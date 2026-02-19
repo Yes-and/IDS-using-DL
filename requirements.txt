@@ -1,0 +1,28 @@
+# Deep learning
+torch>=2.2.0
+torchvision>=0.17.0          # optional, used via torch ecosystem
+
+# Data science & preprocessing
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.4.0
+imbalanced-learn>=0.12.0     # SMOTE and other resampling strategies
+scipy>=1.13.0
+
+# Visualisation
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Configuration
+pyyaml>=6.0.1
+
+# Experiment tracking
+tensorboard>=2.16.0
+
+# Progress bars
+tqdm>=4.66.0
+
+# Notebooks (EDA and results analysis)
+jupyter>=1.0.0
+ipykernel>=6.29.0
+ipywidgets>=8.1.0
