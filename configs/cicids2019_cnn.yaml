@@ -1,0 +1,21 @@
+dataset: cicids2019
+
+val_size: 0.10
+test_size: 0.10
+seed: 42
+
+arch: cnn1d
+input_dim: null
+num_classes: null
+channels: [64, 128, 256]
+kernel_size: 3
+dropout: 0.3
+
+epochs: 50
+batch_size: 1024
+lr: 1.0e-3
+weight_decay: 1.0e-4
+scheduler: plateau
+loss: focal
+focal_gamma: 2.0
+use_class_weights: true

@@ -1,0 +1,23 @@
+dataset: xiiotid
+
+# Preprocessing
+val_size: 0.10
+test_size: 0.10
+seed: 42
+
+# Model
+arch: dnn
+input_dim: null          # filled in at runtime from data
+num_classes: null         # filled in at runtime from data
+hidden_dims: [256, 128, 64]
+dropout: 0.3
+
+# Training
+epochs: 50
+batch_size: 1024
+lr: 1.0e-3
+weight_decay: 1.0e-4
+scheduler: plateau        # 'plateau' | 'cosine' | null
+loss: focal               # 'focal' | 'cross_entropy'
+focal_gamma: 2.0
+use_class_weights: true
