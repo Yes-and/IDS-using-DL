@@ -1,35 +1,29 @@
-"""Feedforward deep neural network for tabular IDS data."""
-from __future__ import annotations
-
-import torch
-import torch.nn as nn
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
 
 
-class DNN(nn.Module):
-    """Fully-connected DNN with BatchNorm and Dropout.
+def preprocess_dataset(df, label_column, test_size):
 
-    Args:
-        input_dim: Number of input features.
-        num_classes: Number of traffic classes.
-        hidden_dims: Sequence of hidden layer widths.
-        dropout: Dropout probability applied after each hidden layer.
-    """
+    df = df.dropna()
 
-    def __init__(
-        self,
-        input_dim: int,
-        num_classes: int,
-        hidden_dims: list[int] = (256, 128, 64),
-        dropout: float = 0.3,
-    ):
-        super().__init__()
-        layers: list[nn.Module] = []
-        in_dim = input_dim
-        for h in hidden_dims:
-            layers += [nn.Linear(in_dim, h), nn.BatchNorm1d(h), nn.ReLU(), nn.Dropout(dropout)]
-            in_dim = h
-        layers.append(nn.Linear(in_dim, num_classes))
-        self.net = nn.Sequential(*layers)
+    X = df.drop(columns=[label_column])
+    y = df[label_column]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+    X = X.select_dtypes(include=["number"])
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    encoder = LabelEncoder()
+    y_encoded = encoder.fit_transform(y)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled,
+        y_encoded,
+        test_size=test_size,
+        stratify=y_encoded,
+        random_state=42
+    )
+
+    return X_train, X_test, y_train, y_test, encoder
