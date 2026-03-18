@@ -14,7 +14,7 @@ import yaml
 ROOT = Path(__file__).parent.parent
 
 
-def _save_report(cfg, config_path, X_train, X_test, le, binary_history, attack_history, out_dir):
+def _save_report(cfg, config_path, X_train, X_val, X_test, le, binary_history, attack_history, out_dir):
     now = datetime.now()
     bh = binary_history.history
     ah = attack_history.history
@@ -34,6 +34,7 @@ def _save_report(cfg, config_path, X_train, X_test, le, binary_history, attack_h
 | Split   | Samples   | Features |
 |---------|-----------|----------|
 | Train   | {X_train.shape[0]:,} | {X_train.shape[1]} |
+| Val     | {X_val.shape[0]:,} | {X_val.shape[1]} |
 | Test    | {X_test.shape[0]:,} | {X_test.shape[1]} |
 
 **Classes ({len(le.classes_)}):** {", ".join(le.classes_)}
@@ -92,10 +93,13 @@ def main():
     # Load preprocessed data
     # -----------------------------------------
     X_train = np.load(proc_dir / "X_train.npy")
+    X_val   = np.load(proc_dir / "X_val.npy")
     X_test  = np.load(proc_dir / "X_test.npy")
     yb_train = np.load(proc_dir / "yb_train.npy")
+    yb_val   = np.load(proc_dir / "yb_val.npy")
     yb_test  = np.load(proc_dir / "yb_test.npy")
     ym_train = np.load(proc_dir / "ym_train.npy")
+    ym_val   = np.load(proc_dir / "ym_val.npy")
     ym_test  = np.load(proc_dir / "ym_test.npy")
 
     with open(proc_dir / "label_encoder.pkl", "rb") as f:
@@ -108,7 +112,7 @@ def main():
 
     print("\n--- Training Binary Model ---")
     binary_model, binary_history = train_binary_model(
-        X_train, yb_train, X_test, yb_test, cfg
+        X_train, yb_train, X_val, yb_val, cfg
     )
 
     out_dir = ROOT / cfg["output"]["model_dir"]
@@ -128,13 +132,13 @@ def main():
     attack_mask = yb_train == 1
     X_train_attack = X_train[attack_mask]
 
-    attack_mask_test = yb_test == 1
-    X_test_attack = X_test[attack_mask_test]
+    attack_mask_val  = yb_val  == 1
+    X_val_attack  = X_val[attack_mask_val]
 
     # Re-encode attack labels to contiguous 0-indexed classes
     attack_le = AttackLabelEncoder()
     y_train_attack = attack_le.fit_transform(ym_train[attack_mask])
-    y_test_attack  = attack_le.transform(ym_test[attack_mask_test])
+    y_val_attack   = attack_le.transform(ym_val[attack_mask_val])
 
     classes = np.unique(y_train_attack)
     weights = compute_class_weight(class_weight="balanced", classes=classes, y=y_train_attack)
@@ -143,7 +147,7 @@ def main():
 
     attack_model, attack_history = train_attack_model(
         X_train_attack, y_train_attack,
-        X_test_attack,  y_test_attack,
+        X_val_attack,   y_val_attack,
         class_weights, cfg
     )
 
@@ -153,7 +157,7 @@ def main():
     # -----------------------------------------
     # Save training report
     # -----------------------------------------
-    _save_report(cfg, args.config, X_train, X_test, le, binary_history, attack_history, out_dir)
+    _save_report(cfg, args.config, X_train, X_val, X_test, le, binary_history, attack_history, out_dir)
 
 
 if __name__ == "__main__":

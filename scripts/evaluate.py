@@ -7,6 +7,7 @@ Usage:
 import argparse
 import json
 import pickle
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -82,7 +83,7 @@ def main():
     metrics_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    run = Path(args.checkpoint).stem
+    run = Path(args.checkpoint).stem + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
 
     with open(metrics_dir / f"{run}_binary_metrics.json", "w") as f:
         json.dump({k: v for k, v in binary_results.items() if k != "cm"}, f, indent=2)

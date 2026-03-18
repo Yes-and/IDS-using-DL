@@ -169,7 +169,7 @@ the main driver of inflated scores.
 
 ---
 
-### Step 2 — Separate validation set from test set `[ ]`
+### Step 2 — Separate validation set from test set `[x]`
 
 **Files:** `src/data/preprocessing.py`, `scripts/train.py`
 
@@ -181,6 +181,12 @@ train/val/test). Pass the val split to trainers and keep the test split untouche
 final evaluation in `evaluate.py`.
 
 **Expected signal:** Metrics on the true test set should be somewhat lower and more honest.
+
+**Result (2026-03-18):** Minimal impact. Binary best val acc dropped from 0.9882 → 0.9852 (-0.003),
+attack-type best val acc unchanged (0.9966 → 0.9971, within noise). The model was not meaningfully
+over-fitted to the test set via early stopping. Scores remain suspiciously high — the dataset itself
+appears to be the main driver. Val metrics from this run onwards are trustworthy (test set untouched).
+Also fixed `evaluate.py` to save timestamped output files so runs are no longer overwritten.
 
 ---
 
