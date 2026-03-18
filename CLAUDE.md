@@ -148,11 +148,74 @@ python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --checkpoint result
 
 ---
 
-## Known issues / TODO
+## Investigation plan — suspiciously good results
+
+The pipeline produces metrics that are too good to trust. Fixing the issues below one at a time
+(retrain + evaluate after each step) will reveal how much each one inflates scores.
+
+### Step 1 — Drop identity features `[ ]`
+
+**File:** `src/data/preprocessing.py`
+
+`Date`, `Timestamp`, `Scr_IP`, `Des_IP` are factorized to integers and kept in `X`.
+In this lab dataset specific IP addresses and timestamps likely map 1-to-1 to attack types,
+so the model can memorise identity instead of learning traffic behaviour.
+
+**Change:** Explicitly drop these columns before building `X` (after factorizing object columns,
+before the train/test split).
+
+**Expected signal:** If accuracy drops substantially, label leakage via identity features was
+the main driver of inflated scores.
+
+---
+
+### Step 2 — Separate validation set from test set `[ ]`
+
+**Files:** `src/data/preprocessing.py`, `scripts/train.py`
+
+Both `EarlyStopping` and `ReduceLROnPlateau` currently use `X_test`/`y_test` as
+`validation_data`, so the model is implicitly optimised against the held-out set.
+
+**Change:** Carve out a dedicated validation split from the training data (e.g. 80/10/10
+train/val/test). Pass the val split to trainers and keep the test split untouched until
+final evaluation in `evaluate.py`.
+
+**Expected signal:** Metrics on the true test set should be somewhat lower and more honest.
+
+---
+
+### Step 3 — Switch to a time-based split `[ ]`
+
+**File:** `src/data/preprocessing.py`
+
+`train_test_split` randomly shuffles rows. For IDS, training on earlier traffic and testing
+on later traffic is more representative of real deployment.
+
+**Change:** Sort by `Timestamp` (or `Date`) before splitting, then cut at a fixed index
+instead of using `train_test_split`. (Do this after Step 1 removes `Timestamp` from features —
+it can still be used for ordering before being dropped.)
+
+**Expected signal:** Metrics may drop further if the model was benefiting from seeing future
+traffic patterns during training.
+
+---
+
+### Step 4 — Add class weighting to the binary model `[ ]`
+
+**File:** `src/training/trainer_binary.py`
+
+The attack-type model uses `class_weight` but the binary model does not. If Normal >> Attack
+in the dataset the binary model may be biased toward predicting Normal.
+
+**Change:** Compute balanced class weights for the binary labels (same pattern as `train.py`
+does for the attack model) and pass them to `model.fit()`.
+
+**Expected signal:** Binary recall on the Attack class should improve; overall accuracy may
+dip slightly.
+
+---
+
+## Other known issues / TODO
 
 1. **CICIDS-2019** — config exists (`configs/cicids2019_dnn.yaml`) but no data loader; implement `src/data/cicids2019.py` if needed
 2. **`dnn.py` ignores `model.hidden_dims` and `model.dropout` from config** — architecture is hardcoded to 256→128→64→32; could be made config-driven
-3. **No class weighting in binary trainer** — `trainer_binary.py` doesn't apply class weights; may matter if Normal/Attack ratio is very skewed
-4. **Identity features inflate evaluation scores** — `Date`, `Timestamp`, `Scr_IP`, `Des_IP` are kept as features (factorized to integers). In this lab dataset certain IPs/timestamps may map directly to attack types, letting the model memorize identity rather than learn traffic behaviour. These should be dropped from X in `preprocessing.py` before trusting evaluation results.
-5. **Test set used for early stopping** — `EarlyStopping` and `ReduceLROnPlateau` both monitor `val_loss` on the test split, so the model is implicitly optimised against it. A proper evaluation requires a separate held-out set never seen during training.
-6. **Random split instead of time-based split** — `train_test_split` uses random shuffling. For IDS models a time-based split (train on earlier traffic, test on later) is more representative of real deployment conditions.
