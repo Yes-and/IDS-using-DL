@@ -55,7 +55,7 @@ def train_attack_model(X_train, y_train, X_val, y_val, class_weights, config=Non
     # =========================
     # TRAIN
     # =========================
-    model.fit(
+    history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
         epochs=epochs,
@@ -65,4 +65,4 @@ def train_attack_model(X_train, y_train, X_val, y_val, class_weights, config=Non
         verbose=1
     )
 
-    return model
+    return model, history

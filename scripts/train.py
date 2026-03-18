@@ -5,12 +5,77 @@ Usage:
 """
 import argparse
 import pickle
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import yaml
 
 ROOT = Path(__file__).parent.parent
+
+
+def _save_report(cfg, config_path, X_train, X_test, le, binary_history, attack_history, out_dir):
+    now = datetime.now()
+    bh = binary_history.history
+    ah = attack_history.history
+
+    def best(metric): return max(metric)
+    def last(metric): return metric[-1]
+
+    report = f"""# Training Run Report
+
+**Date:** {now.strftime("%Y-%m-%d %H:%M:%S")}
+**Config:** {config_path}
+
+---
+
+## Dataset
+
+| Split   | Samples   | Features |
+|---------|-----------|----------|
+| Train   | {X_train.shape[0]:,} | {X_train.shape[1]} |
+| Test    | {X_test.shape[0]:,} | {X_test.shape[1]} |
+
+**Classes ({len(le.classes_)}):** {", ".join(le.classes_)}
+
+---
+
+## Stage 1: Binary Model
+
+| Metric | Value |
+|--------|-------|
+| Epochs run | {len(bh["loss"])} / {cfg["training"]["epochs"]} |
+| Final train accuracy | {last(bh["accuracy"]):.4f} |
+| Final val accuracy | {last(bh["val_accuracy"]):.4f} |
+| Best val accuracy | {best(bh["val_accuracy"]):.4f} |
+| Final train loss | {last(bh["loss"]):.4f} |
+| Final val loss | {last(bh["val_loss"]):.4f} |
+
+---
+
+## Stage 2: Attack-Type Model
+
+| Metric | Value |
+|--------|-------|
+| Epochs run | {len(ah["loss"])} / {cfg["training"]["epochs"]} |
+| Final train accuracy | {last(ah["accuracy"]):.4f} |
+| Final val accuracy | {last(ah["val_accuracy"]):.4f} |
+| Best val accuracy | {best(ah["val_accuracy"]):.4f} |
+| Final train loss | {last(ah["loss"]):.4f} |
+| Final val loss | {last(ah["val_loss"]):.4f} |
+
+---
+
+## Notes
+
+<!-- Add observations, what changed, known issues, next steps -->
+"""
+
+    reports_dir = out_dir.parent / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = reports_dir / f"run_{now.strftime('%Y%m%d_%H%M%S')}.md"
+    report_path.write_text(report)
+    print(f"Report saved to {report_path}")
 
 
 def main():
@@ -42,7 +107,7 @@ def main():
     from src.training.trainer_binary import train_binary_model
 
     print("\n--- Training Binary Model ---")
-    binary_model = train_binary_model(
+    binary_model, binary_history = train_binary_model(
         X_train, yb_train, X_test, yb_test, cfg
     )
 
@@ -76,7 +141,7 @@ def main():
     class_weights = dict(zip(classes, weights))
     print("Class weights:", class_weights)
 
-    attack_model = train_attack_model(
+    attack_model, attack_history = train_attack_model(
         X_train_attack, y_train_attack,
         X_test_attack,  y_test_attack,
         class_weights, cfg
@@ -84,6 +149,11 @@ def main():
 
     attack_model.save_weights(str(out_dir / "attack_model.weights.h5"))
     print(f"Attack model saved to {out_dir / 'attack_model.weights.h5'}")
+
+    # -----------------------------------------
+    # Save training report
+    # -----------------------------------------
+    _save_report(cfg, args.config, X_train, X_test, le, binary_history, attack_history, out_dir)
 
 
 if __name__ == "__main__":

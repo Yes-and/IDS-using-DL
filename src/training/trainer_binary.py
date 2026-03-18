@@ -38,7 +38,7 @@ def train_binary_model(X_train, y_train, X_val, y_val, config=None):
         restore_best_weights=True
     )
 
-    model.fit(
+    history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
         epochs=epochs,
@@ -47,4 +47,4 @@ def train_binary_model(X_train, y_train, X_val, y_val, config=None):
         verbose=1
     )
 
-    return model
+    return model, history
