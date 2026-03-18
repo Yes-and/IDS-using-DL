@@ -17,8 +17,8 @@ Trains deep learning classifiers for network intrusion detection (IDS) on the **
 ### What works
 - Data loading and preprocessing for XIIOTID (`src/data/xiiotid.py`, `src/data/preprocessing.py`)
 - `scripts/preprocess.py` — saves all `.npy` splits and both `.pkl` artefacts to `data/processed/xiiotid/`
-- `scripts/train.py` — loads processed data, runs two-stage TF training, saves model weights
-- `scripts/evaluate.py` — TF inference via `model.load_weights()` + `model.predict()`, saves metrics JSON + plots
+- `scripts/train.py` — loads processed data, runs two-stage TF training, saves model weights, auto-generates a markdown training report to `results/reports/`
+- `scripts/evaluate.py` — two-stage TF inference, evaluates binary and attack-type models separately, saves metrics JSON + plots
 - Two-stage TensorFlow training: binary model then attack-type model (`src/training/trainer_binary.py`, `src/training/trainer_attack.py`)
 - Model factory (`src/models/build.py`) — TF only, extensible
 - Evaluation metrics and plots (`src/evaluation/metrics.py`, `src/evaluation/plots.py`)
@@ -42,7 +42,7 @@ Input flow → [Binary model] → Normal / Attack
 ```
 
 - **Stage 1** (`trainer_binary.py`): 2-layer TF sigmoid classifier. Labels: `0 = Normal`, `1 = Attack`.
-- **Stage 2** (`trainer_attack.py`): 3-layer TF softmax classifier. Trained only on attack samples. Labels are offset: `y - 1` so class 0 = first attack type.
+- **Stage 2** (`trainer_attack.py`): 3-layer TF softmax classifier. Trained only on attack samples. After filtering to attack samples, labels are re-encoded with a fresh `LabelEncoder` to produce contiguous 0-indexed classes (18 classes, Normal excluded).
 
 ### Framework
 
@@ -91,6 +91,7 @@ Active config: `configs/xiiotid_dnn.yaml`. (`configs/cicids2019_dnn.yaml` exists
 ## File map
 
 ```
+pyproject.toml                  Editable install config — run `pip install -e .` once after cloning
 configs/
   xiiotid_dnn.yaml              Experiment config for XIIOTID + DNN
   cicids2019_dnn.yaml           Experiment config for CICIDS-2019 + DNN (dataset not supported)
@@ -103,23 +104,28 @@ notebooks/
   test_loading.ipynb            Data loading experiments
 scripts/
   preprocess.py                 Load + preprocess + save all outputs
-  train.py                      Two-stage training (requires --config)
-  evaluate.py                   Inference + metrics + plots (requires --config + --checkpoint)
+  train.py                      Two-stage training (requires --config); auto-saves report to results/reports/
+  evaluate.py                   Two-stage inference + metrics + plots (requires --config + --checkpoint)
 src/
   data/
     xiiotid.py                  XIIOTID CSV loader
     preprocessing.py            Encoding, scaling, stratified train/test split
                                 Returns: X_train, X_test, yb_train, yb_test, ym_train, ym_test, le, scaler
+                                Note: drops class2, class3 from features; applies pd.to_numeric safety net
   models/
     dnn.py                      TF DNN builder
     build.py                    Model factory: routes config["arch"] to the right builder
   training/
-    trainer_binary.py           Stage 1 binary TF trainer (reads config)
-    trainer_attack.py           Stage 2 attack-type TF trainer (reads config)
+    trainer_binary.py           Stage 1 binary TF trainer — returns (model, history)
+    trainer_attack.py           Stage 2 attack-type TF trainer — returns (model, history)
   evaluation/
     metrics.py                  full_report(): accuracy, F1, confusion matrix, per-class F1
     plots.py                    plot_confusion_matrix(), plot_per_class_f1()
-results/                        Checkpoints, metrics JSON, plots (gitignored)
+results/
+  models/                       Saved model weights (gitignored)
+  metrics/                      Metrics JSON per evaluation run (gitignored)
+  figures/                      Confusion matrix + F1 plots (gitignored)
+  reports/                      Auto-generated markdown training reports (gitignored)
 ```
 
 ---

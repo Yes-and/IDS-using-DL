@@ -45,7 +45,11 @@ src/
   models/           TensorFlow DNN architecture and model factory
   training/         Two-stage training loops (binary + attack-type)
   evaluation/       Metrics and plots
-results/            Checkpoints, metrics JSON, plots (gitignored)
+results/
+  models/           Saved model weights (gitignored)
+  metrics/          Metrics JSON per evaluation run (gitignored)
+  figures/          Confusion matrix + F1 plots (gitignored)
+  reports/          Auto-generated markdown training reports (gitignored)
 ```
 
 ---
