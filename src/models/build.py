@@ -1,37 +1,22 @@
-"""Model factory: construct a model from a config dict."""
-from __future__ import annotations
-
-import torch.nn as nn
-
-from .cnn1d import CNN1D
-from .dnn import DNN
+from .dnn import build_dnn
 
 
-def build_model(cfg: dict) -> nn.Module:
-    """Return an instantiated model based on ``cfg['arch']``.
+def build_model(config):
+    """Build and return a compiled model from a config dict.
 
-    Expected config keys (all models):
-        arch (str): 'dnn' | 'cnn1d'
-        input_dim (int)
-        num_classes (int)
+    Reads config["arch"] to select the architecture.
+    config["input_dim"] and config["num_classes"] must be set before calling.
 
-    DNN-specific keys: hidden_dims, dropout
-    CNN1D-specific keys: channels, kernel_size, dropout
+    To add a new architecture:
+        1. Implement build_<name>(input_dim, num_classes) in its own module.
+        2. Import it here and add an elif branch below.
     """
-    arch = cfg["arch"].lower()
+    arch = config["arch"]
+    input_dim = config["input_dim"]
+    num_classes = config["num_classes"]
+
     if arch == "dnn":
-        return DNN(
-            input_dim=cfg["input_dim"],
-            num_classes=cfg["num_classes"],
-            hidden_dims=cfg.get("hidden_dims", [256, 128, 64]),
-            dropout=cfg.get("dropout", 0.3),
-        )
-    if arch == "cnn1d":
-        return CNN1D(
-            input_dim=cfg["input_dim"],
-            num_classes=cfg["num_classes"],
-            channels=cfg.get("channels", [64, 128, 256]),
-            kernel_size=cfg.get("kernel_size", 3),
-            dropout=cfg.get("dropout", 0.3),
-        )
-    raise ValueError(f"Unknown architecture: {arch!r}")
+        return build_dnn(input_dim, num_classes)
+
+    else:
+        raise ValueError(f"Unsupported architecture: {arch!r}")

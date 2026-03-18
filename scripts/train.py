@@ -1,74 +1,159 @@
-"""Train a model from a YAML config.
+"""Train the two-stage IDS classifier.
 
 Usage:
     python scripts/train.py --config configs/xiiotid_dnn.yaml
-    python scripts/train.py --config configs/cicids2019_cnn.yaml --run-name my_exp
 """
 import argparse
 import pickle
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import torch
 import yaml
 
 ROOT = Path(__file__).parent.parent
 
 
+def _save_report(cfg, config_path, X_train, X_test, le, binary_history, attack_history, out_dir):
+    now = datetime.now()
+    bh = binary_history.history
+    ah = attack_history.history
+
+    def best(metric): return max(metric)
+    def last(metric): return metric[-1]
+
+    report = f"""# Training Run Report
+
+**Date:** {now.strftime("%Y-%m-%d %H:%M:%S")}
+**Config:** {config_path}
+
+---
+
+## Dataset
+
+| Split   | Samples   | Features |
+|---------|-----------|----------|
+| Train   | {X_train.shape[0]:,} | {X_train.shape[1]} |
+| Test    | {X_test.shape[0]:,} | {X_test.shape[1]} |
+
+**Classes ({len(le.classes_)}):** {", ".join(le.classes_)}
+
+---
+
+## Stage 1: Binary Model
+
+| Metric | Value |
+|--------|-------|
+| Epochs run | {len(bh["loss"])} / {cfg["training"]["epochs"]} |
+| Final train accuracy | {last(bh["accuracy"]):.4f} |
+| Final val accuracy | {last(bh["val_accuracy"]):.4f} |
+| Best val accuracy | {best(bh["val_accuracy"]):.4f} |
+| Final train loss | {last(bh["loss"]):.4f} |
+| Final val loss | {last(bh["val_loss"]):.4f} |
+
+---
+
+## Stage 2: Attack-Type Model
+
+| Metric | Value |
+|--------|-------|
+| Epochs run | {len(ah["loss"])} / {cfg["training"]["epochs"]} |
+| Final train accuracy | {last(ah["accuracy"]):.4f} |
+| Final val accuracy | {last(ah["val_accuracy"]):.4f} |
+| Best val accuracy | {best(ah["val_accuracy"]):.4f} |
+| Final train loss | {last(ah["loss"]):.4f} |
+| Final val loss | {last(ah["val_loss"]):.4f} |
+
+---
+
+## Notes
+
+<!-- Add observations, what changed, known issues, next steps -->
+"""
+
+    reports_dir = out_dir.parent / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = reports_dir / f"run_{now.strftime('%Y%m%d_%H%M%S')}.md"
+    report_path.write_text(report)
+    print(f"Report saved to {report_path}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--run-name", default=None)
     args = parser.parse_args()
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    dataset = cfg["dataset"]
-    proc_dir = ROOT / "data" / "processed" / dataset
+    proc_dir = ROOT / cfg["data"]["processed_path"]
 
+    # -----------------------------------------
+    # Load preprocessed data
+    # -----------------------------------------
     X_train = np.load(proc_dir / "X_train.npy")
-    X_val = np.load(proc_dir / "X_val.npy")
-    y_train = np.load(proc_dir / "y_train.npy")
-    y_val = np.load(proc_dir / "y_val.npy")
+    X_test  = np.load(proc_dir / "X_test.npy")
+    yb_train = np.load(proc_dir / "yb_train.npy")
+    yb_test  = np.load(proc_dir / "yb_test.npy")
+    ym_train = np.load(proc_dir / "ym_train.npy")
+    ym_test  = np.load(proc_dir / "ym_test.npy")
+
     with open(proc_dir / "label_encoder.pkl", "rb") as f:
         le = pickle.load(f)
 
-    cfg["input_dim"] = X_train.shape[1]
-    cfg["num_classes"] = len(le.classes_)
+    # -----------------------------------------
+    # Stage 1: Binary model
+    # -----------------------------------------
+    from src.training.trainer_binary import train_binary_model
 
-    from src.data.dataset import IDSDataset
-    from src.models.build import build_model
-    from src.training.losses import FocalLoss
-    from src.training.trainer import fit
+    print("\n--- Training Binary Model ---")
+    binary_model, binary_history = train_binary_model(
+        X_train, yb_train, X_test, yb_test, cfg
+    )
 
-    cnn_input = cfg["arch"] == "cnn1d"
-    train_ds = IDSDataset(X_train, y_train, cnn_input=cnn_input)
-    val_ds = IDSDataset(X_val, y_val, cnn_input=cnn_input)
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=cfg["batch_size"], shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=cfg["batch_size"] * 2)
+    out_dir = ROOT / cfg["output"]["model_dir"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    binary_model.save_weights(str(out_dir / "binary_model.weights.h5"))
+    print(f"Binary model saved to {out_dir / 'binary_model.weights.h5'}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_model(cfg).to(device)
+    # -----------------------------------------
+    # Stage 2: Attack-type model (attack samples only)
+    # -----------------------------------------
+    from sklearn.preprocessing import LabelEncoder as AttackLabelEncoder
+    from sklearn.utils.class_weight import compute_class_weight
+    from src.training.trainer_attack import train_attack_model
 
-    # Class-weighted loss
-    if cfg.get("use_class_weights"):
-        counts = np.bincount(y_train)
-        weights = torch.tensor(1.0 / (counts + 1e-6), dtype=torch.float32).to(device)
-    else:
-        weights = None
+    print("\n--- Training Attack Model ---")
 
-    if cfg.get("loss") == "focal":
-        criterion = FocalLoss(gamma=cfg.get("focal_gamma", 2.0), weight=weights)
-    else:
-        criterion = torch.nn.CrossEntropyLoss(weight=weights)
+    attack_mask = yb_train == 1
+    X_train_attack = X_train[attack_mask]
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5) if cfg.get("scheduler") == "plateau" else None
+    attack_mask_test = yb_test == 1
+    X_test_attack = X_test[attack_mask_test]
 
-    run_name = args.run_name or f"{dataset}_{cfg['arch']}"
-    fit(model, train_loader, val_loader, criterion, optimizer, scheduler,
-        cfg["epochs"], device, ROOT / "results", run_name)
+    # Re-encode attack labels to contiguous 0-indexed classes
+    attack_le = AttackLabelEncoder()
+    y_train_attack = attack_le.fit_transform(ym_train[attack_mask])
+    y_test_attack  = attack_le.transform(ym_test[attack_mask_test])
+
+    classes = np.unique(y_train_attack)
+    weights = compute_class_weight(class_weight="balanced", classes=classes, y=y_train_attack)
+    class_weights = dict(zip(classes, weights))
+    print("Class weights:", class_weights)
+
+    attack_model, attack_history = train_attack_model(
+        X_train_attack, y_train_attack,
+        X_test_attack,  y_test_attack,
+        class_weights, cfg
+    )
+
+    attack_model.save_weights(str(out_dir / "attack_model.weights.h5"))
+    print(f"Attack model saved to {out_dir / 'attack_model.weights.h5'}")
+
+    # -----------------------------------------
+    # Save training report
+    # -----------------------------------------
+    _save_report(cfg, args.config, X_train, X_test, le, binary_history, attack_history, out_dir)
 
 
 if __name__ == "__main__":

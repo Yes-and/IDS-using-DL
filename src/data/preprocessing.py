@@ -1,54 +1,56 @@
-"""Shared preprocessing utilities: normalisation, encoding, and splitting."""
-from __future__ import annotations
-
-from typing import Tuple, Union
-
-import numpy as np
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
+def preprocess_dataset(df, label_column="class1", test_size=0.2, random_state=42):
 
-def encode_labels(
-    labels: Union[pd.Series, np.ndarray],
-) -> Tuple[np.ndarray, LabelEncoder]:
-    """Encode string or integer class labels to contiguous integers.
+    print("Starting preprocessing...")
 
-    Args:
-        labels: 1-D array-like of raw class labels (strings or integers).
-            Accepts both ``pd.Series`` and ``np.ndarray`` (e.g. from Polars
-            ``.to_numpy()``).
+    # ==============================
+    # 1. CREATE BINARY LABEL
+    # ==============================
+    df["binary_label"] = df[label_column].apply(
+        lambda x: 0 if x == "Normal" else 1
+    )
 
-    Returns:
-        Tuple of (encoded integer array, fitted LabelEncoder).
-    """
+    # ==============================
+    # 2. HANDLE NON-NUMERIC COLUMNS
+    # ==============================
+    for col in df.columns:
+        if df[col].dtype == "object" and col not in [label_column]:
+            df[col] = pd.factorize(df[col])[0]
+
+    df = df.fillna(0)
+
+    # ==============================
+    # 3. SPLIT FEATURES / LABELS
+    # ==============================
+    label_cols = [label_column, "binary_label"] + [c for c in ["class2", "class3"] if c in df.columns]
+    X = df.drop(columns=label_cols)
+    X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
+    y_binary = df["binary_label"]
+
+    # Encode multiclass
     le = LabelEncoder()
-    encoded = le.fit_transform(labels)
-    return encoded, le
+    y_multi = le.fit_transform(df[label_column])
 
+    print("Classes:", le.classes_)
 
-def scale_features(
-    X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, StandardScaler]:
+    # ==============================
+    # 4. TRAIN TEST SPLIT
+    # ==============================
+    X_train, X_test, yb_train, yb_test, ym_train, ym_test = train_test_split(
+        X, y_binary, y_multi, test_size=test_size, random_state=random_state, stratify=y_binary
+    )
+
+    # ==============================
+    # 5. SCALE
+    # ==============================
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
-    X_val = scaler.transform(X_val)
     X_test = scaler.transform(X_test)
-    return X_train, X_val, X_test, scaler
 
+    print("Preprocessing complete")
 
-def split_data(
-    X: np.ndarray,
-    y: np.ndarray,
-    val_size: float = 0.10,
-    test_size: float = 0.10,
-    seed: int = 42,
-) -> Tuple[np.ndarray, ...]:
-    X_tmp, X_test, y_tmp, y_test = train_test_split(
-        X, y, test_size=test_size, stratify=y, random_state=seed
-    )
-    val_frac = val_size / (1.0 - test_size)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_tmp, y_tmp, test_size=val_frac, stratify=y_tmp, random_state=seed
-    )
-    return X_train, X_val, X_test, y_train, y_val, y_test
+    return X_train, X_test, yb_train, yb_test, ym_train, ym_test, le, scaler
