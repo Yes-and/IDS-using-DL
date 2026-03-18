@@ -144,3 +144,6 @@ python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --checkpoint result
 1. **CICIDS-2019** — implement dataset loader (`src/data/cicids2019.py`) if that dataset is needed
 2. **`dnn.py` ignores `model.hidden_dims` and `model.dropout` from config** — architecture is hardcoded to 256→128→64→32; could be made config-driven
 3. **No class weighting in binary trainer** — `trainer_binary.py` doesn't apply class weights; may matter if Normal/Attack ratio is very skewed
+4. **Identity features inflate evaluation scores** — `Date`, `Timestamp`, `Scr_IP`, `Des_IP` are kept as features (factorized to integers). In this lab dataset certain IPs/timestamps may map directly to attack types, letting the model memorize identity rather than learn traffic behaviour. These should be dropped from X in `preprocessing.py` before trusting evaluation results.
+5. **Test set used for early stopping** — `EarlyStopping` and `ReduceLROnPlateau` both monitor `val_loss` on the test split, so the model is implicitly optimised against it. A proper evaluation requires a separate held-out set never seen during training.
+6. **Random split instead of time-based split** — `train_test_split` uses random shuffling. For IDS models a time-based split (train on earlier traffic, test on later) is more representative of real deployment conditions.
