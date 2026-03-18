@@ -24,9 +24,15 @@ def build_binary_model(input_dim):
     return model
 
 
-def train_binary_model(X_train, y_train, X_val, y_val):
+def train_binary_model(X_train, y_train, X_val, y_val, config=None):
 
     model = build_binary_model(X_train.shape[1])
+
+    epochs     = config["training"]["epochs"]     if config else 30
+    batch_size = config["training"]["batch_size"] if config else 512
+    lr         = config["training"]["learning_rate"] if config else 0.001
+
+    tf.keras.backend.set_value(model.optimizer.learning_rate, lr)
 
     early_stop = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss',
@@ -34,11 +40,11 @@ def train_binary_model(X_train, y_train, X_val, y_val):
         restore_best_weights=True
     )
 
-    history = model.fit(
+    model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
-        epochs=30,
-        batch_size=512,
+        epochs=epochs,
+        batch_size=batch_size,
         callbacks=[early_stop],
         verbose=1
     )

@@ -34,7 +34,7 @@ def build_attack_model(input_dim, num_classes):
     return model
 
 
-def train_attack_model(X_train, y_train, X_val, y_val, class_weights):
+def train_attack_model(X_train, y_train, X_val, y_val, class_weights, config=None):
 
     model = build_attack_model(X_train.shape[1], len(set(y_train)))
 
@@ -54,16 +54,22 @@ def train_attack_model(X_train, y_train, X_val, y_val, class_weights):
         min_lr=1e-5
     )
 
+    epochs     = config["training"]["epochs"]        if config else 40
+    batch_size = config["training"]["batch_size"]    if config else 512
+    lr         = config["training"]["learning_rate"] if config else 0.0005
+
+    tf.keras.backend.set_value(model.optimizer.learning_rate, lr)
+
     # =========================
     # TRAIN
     # =========================
-    history = model.fit(
+    model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
-        epochs=40,
-        batch_size=512,
+        epochs=epochs,
+        batch_size=batch_size,
         callbacks=[early_stop, lr_scheduler],
-        class_weight=class_weights,   # 🔥 KEY FIX
+        class_weight=class_weights,
         verbose=1
     )
 
