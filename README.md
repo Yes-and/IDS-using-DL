@@ -11,6 +11,7 @@ Deep learning models for network intrusion detection on the **XIIOTID** dataset,
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ---
