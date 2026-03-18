@@ -24,7 +24,7 @@ def build_binary_model(input_dim, lr=0.001):
     return model
 
 
-def train_binary_model(X_train, y_train, X_val, y_val, config=None):
+def train_binary_model(X_train, y_train, X_val, y_val, config=None, class_weight=None):
 
     epochs     = config["training"]["epochs"]     if config else 30
     batch_size = config["training"]["batch_size"] if config else 512
@@ -44,6 +44,7 @@ def train_binary_model(X_train, y_train, X_val, y_val, config=None):
         epochs=epochs,
         batch_size=batch_size,
         callbacks=[early_stop],
+        class_weight=class_weight,
         verbose=1
     )
 

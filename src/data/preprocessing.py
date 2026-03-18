@@ -1,10 +1,13 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import LabelEncoder
 
-def preprocess_dataset(df, label_column="class1", test_size=0.2, random_state=42):
 
+def preprocess_dataset(df, label_column="class1"):
+    """Return raw unscaled arrays X, yb, ym, le.
+
+    Scaling must be done per-fold in train.py to avoid data leakage.
+    """
     print("Starting preprocessing...")
 
     # ==============================
@@ -31,37 +34,12 @@ def preprocess_dataset(df, label_column="class1", test_size=0.2, random_state=42
     drop_cols = label_cols + [c for c in identity_cols if c in df.columns]
     X = df.drop(columns=drop_cols)
     X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
-    y_binary = df["binary_label"]
+    yb = df["binary_label"].to_numpy()
 
-    # Encode multiclass
     le = LabelEncoder()
-    y_multi = le.fit_transform(df[label_column])
+    ym = le.fit_transform(df[label_column])
 
     print("Classes:", le.classes_)
+    print(f"Preprocessing complete — samples: {len(X)}, features: {X.shape[1]}")
 
-    # ==============================
-    # 4. TRAIN / VAL / TEST SPLIT
-    # ==============================
-    # First cut off the test set (10% of total)
-    X_temp, X_test, yb_temp, yb_test, ym_temp, ym_test = train_test_split(
-        X, y_binary, y_multi, test_size=test_size, random_state=random_state, stratify=y_binary
-    )
-
-    # Split remaining 90% into train (88.9%) and val (11.1%) → ~80/10 of total
-    val_size_adjusted = test_size / (1 - test_size)
-    X_train, X_val, yb_train, yb_val, ym_train, ym_val = train_test_split(
-        X_temp, yb_temp, ym_temp, test_size=val_size_adjusted, random_state=random_state, stratify=yb_temp
-    )
-
-    # ==============================
-    # 5. SCALE
-    # ==============================
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_val   = scaler.transform(X_val)
-    X_test  = scaler.transform(X_test)
-
-    print("Preprocessing complete")
-    print(f"Split sizes — train: {len(X_train)}, val: {len(X_val)}, test: {len(X_test)}")
-
-    return X_train, X_val, X_test, yb_train, yb_val, yb_test, ym_train, ym_val, ym_test, le, scaler
+    return X.to_numpy(dtype=np.float32), yb.astype(np.int32), ym.astype(np.int32), le
