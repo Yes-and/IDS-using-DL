@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 
-def build_binary_model(input_dim):
+def build_binary_model(input_dim, lr=0.001):
 
     model = Sequential([
         Dense(128, activation='relu', input_shape=(input_dim,)),
@@ -16,7 +16,7 @@ def build_binary_model(input_dim):
     ])
 
     model.compile(
-        optimizer='adam',
+        optimizer=tf.keras.optimizers.Adam(learning_rate=lr),
         loss='binary_crossentropy',
         metrics=['accuracy']
     )
@@ -26,13 +26,11 @@ def build_binary_model(input_dim):
 
 def train_binary_model(X_train, y_train, X_val, y_val, config=None):
 
-    model = build_binary_model(X_train.shape[1])
-
     epochs     = config["training"]["epochs"]     if config else 30
     batch_size = config["training"]["batch_size"] if config else 512
     lr         = config["training"]["learning_rate"] if config else 0.001
 
-    tf.keras.backend.set_value(model.optimizer.learning_rate, lr)
+    model = build_binary_model(X_train.shape[1], lr)
 
     early_stop = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss',

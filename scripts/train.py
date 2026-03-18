@@ -54,18 +54,22 @@ def main():
     # -----------------------------------------
     # Stage 2: Attack-type model (attack samples only)
     # -----------------------------------------
+    from sklearn.preprocessing import LabelEncoder as AttackLabelEncoder
     from sklearn.utils.class_weight import compute_class_weight
     from src.training.trainer_attack import train_attack_model
 
     print("\n--- Training Attack Model ---")
 
     attack_mask = yb_train == 1
-    X_train_attack  = X_train[attack_mask]
-    y_train_attack  = ym_train[attack_mask] - 1  # shift so class 0 = first attack type
+    X_train_attack = X_train[attack_mask]
 
     attack_mask_test = yb_test == 1
-    X_test_attack   = X_test[attack_mask_test]
-    y_test_attack   = ym_test[attack_mask_test] - 1
+    X_test_attack = X_test[attack_mask_test]
+
+    # Re-encode attack labels to contiguous 0-indexed classes
+    attack_le = AttackLabelEncoder()
+    y_train_attack = attack_le.fit_transform(ym_train[attack_mask])
+    y_test_attack  = attack_le.transform(ym_test[attack_mask_test])
 
     classes = np.unique(y_train_attack)
     weights = compute_class_weight(class_weight="balanced", classes=classes, y=y_train_attack)
