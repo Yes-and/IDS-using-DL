@@ -10,7 +10,7 @@ Trains deep learning classifiers for network intrusion detection (IDS) on the **
 
 ---
 
-## Current state (as of March 2026)
+## Current state
 
 > The pipeline is end-to-end functional. All known blocking bugs have been fixed.
 
@@ -22,12 +22,6 @@ Trains deep learning classifiers for network intrusion detection (IDS) on the **
 - Two-stage TensorFlow training: binary model then attack-type model (`src/training/trainer_binary.py`, `src/training/trainer_attack.py`)
 - Model factory (`src/models/build.py`) — TF only, extensible
 - Evaluation metrics and plots (`src/evaluation/metrics.py`, `src/evaluation/plots.py`)
-
-### What is incomplete or unsupported
-
-| Item | Status |
-|------|--------|
-| CICIDS-2019 | Config exists (`configs/cicids2019_dnn.yaml`) but no data loader. Not supported. |
 
 ---
 
@@ -48,11 +42,20 @@ Input flow → [Binary model] → Normal / Attack
 
 The entire codebase uses **TensorFlow / Keras**. PyTorch has been removed.
 
+### Model builders vs model factory
+
+**Important:** the training pipeline does **not** go through `build_model()` in `src/models/build.py`. Each trainer has its own builder:
+- `trainer_binary.py` → `build_binary_model(input_dim, lr)`
+- `trainer_attack.py` → `build_attack_model(input_dim, num_classes, lr)`
+
+`build_model()` / `src/models/build.py` is used only by `evaluate.py` (and currently unused there too, since `evaluate.py` calls the trainer builders directly). It exists for future use if a unified builder is needed.
+
 ### Adding a new model architecture
 
-1. Implement `build_<name>(input_dim, num_classes)` in `src/models/<name>.py` — return a compiled TF model.
-2. Import it in `src/models/build.py` and add an `elif arch == "<name>"` branch.
-3. Add a corresponding config file in `configs/`.
+1. Add a new `build_<name>(input_dim, lr)` / `build_<name>(input_dim, num_classes, lr)` function — either in the relevant trainer file or in a new `src/models/<name>.py`.
+2. Wire it into the trainer that needs it.
+3. If you want it accessible via `build_model()`, also import it in `src/models/build.py` and add an `elif` branch.
+4. Add a corresponding config file in `configs/`.
 
 ### Config system
 
@@ -147,7 +150,7 @@ python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --checkpoint result
 
 ## Known issues / TODO
 
-1. **CICIDS-2019** — implement dataset loader (`src/data/cicids2019.py`) if that dataset is needed
+1. **CICIDS-2019** — config exists (`configs/cicids2019_dnn.yaml`) but no data loader; implement `src/data/cicids2019.py` if needed
 2. **`dnn.py` ignores `model.hidden_dims` and `model.dropout` from config** — architecture is hardcoded to 256→128→64→32; could be made config-driven
 3. **No class weighting in binary trainer** — `trainer_binary.py` doesn't apply class weights; may matter if Normal/Attack ratio is very skewed
 4. **Identity features inflate evaluation scores** — `Date`, `Timestamp`, `Scr_IP`, `Des_IP` are kept as features (factorized to integers). In this lab dataset certain IPs/timestamps may map directly to attack types, letting the model memorize identity rather than learn traffic behaviour. These should be dropped from X in `preprocessing.py` before trusting evaluation results.
