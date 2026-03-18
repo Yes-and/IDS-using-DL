@@ -1,8 +1,8 @@
 """Evaluate a saved checkpoint on the test split.
 
 Usage:
-    python scripts/evaluate.py --config configs/xiiotid_dnn.yaml \\
-        --checkpoint results/xiiotid_dnn_best.pt
+    python scripts/evaluate.py --config configs/xiiotid_dnn.yaml \
+        --checkpoint results/xiiotid_dnn_best.weights.h5
 """
 import argparse
 import json
@@ -10,7 +10,6 @@ import pickle
 from pathlib import Path
 
 import numpy as np
-import torch
 import yaml
 
 ROOT = Path(__file__).parent.parent
@@ -37,25 +36,14 @@ def main():
     cfg["input_dim"] = X_test.shape[1]
     cfg["num_classes"] = len(le.classes_)
 
-    from src.data.dataset import IDSDataset
     from src.evaluation.metrics import full_report
     from src.evaluation.plots import plot_confusion_matrix, plot_per_class_f1
     from src.models.build import build_model
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_model(cfg).to(device)
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
-    model.eval()
+    model = build_model(cfg)
+    model.load_weights(args.checkpoint)
 
-    cnn_input = cfg["arch"] == "cnn1d"
-    ds = IDSDataset(X_test, y_test, cnn_input=cnn_input)
-    loader = torch.utils.data.DataLoader(ds, batch_size=cfg.get("batch_size", 2048) * 2)
-
-    preds = []
-    with torch.no_grad():
-        for X, _ in loader:
-            preds.append(model(X.to(device)).argmax(1).cpu().numpy())
-    y_pred = np.concatenate(preds)
+    y_pred = np.argmax(model.predict(X_test), axis=1)
 
     class_names = list(le.classes_)
     results = full_report(y_test, y_pred, class_names)
