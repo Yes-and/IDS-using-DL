@@ -21,7 +21,7 @@ def preprocess_dataset(df, label_column="class1", test_size=0.2, random_state=42
         if df[col].dtype == "object" and col not in [label_column]:
             try:
                 df[col] = pd.to_datetime(df[col], errors="coerce").astype("int64") // 10**9
-            except:
+            except Exception:
                 df[col] = pd.factorize(df[col])[0]
 
     df = df.fillna(0)
@@ -54,4 +54,4 @@ def preprocess_dataset(df, label_column="class1", test_size=0.2, random_state=42
 
     print("Preprocessing complete")
 
-    return X_train, X_test, yb_train, yb_test, ym_train, ym_test, le
+    return X_train, X_test, yb_train, yb_test, ym_train, ym_test, le, scaler

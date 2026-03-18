@@ -1,15 +1,15 @@
 dataset: xiiotid
+arch: dnn
 
 data:
   raw_path: data/raw/xiiotid
-  processed_path: data/processed/xiiotid.csv
+  processed_path: data/processed/xiiotid
   label_column: class1
   test_size: 0.2
 
 model:
-  type: dnn
-  hidden_layers: [512, 256, 128, 64, 32]
-  dropout: 0.2
+  hidden_dims: [256, 128, 64, 32]
+  dropout: 0.3
 
 training:
   batch_size: 256
