@@ -5,10 +5,36 @@ from sklearn.metrics import (
     accuracy_score,
     classification_report,
     confusion_matrix,
-    f1_score
+    f1_score,
+    precision_recall_fscore_support,
 )
 
 from src.evaluation.plots import plot_confusion_matrix
+
+
+def full_report(y_true, y_pred, class_names):
+    """Return a dict of metrics expected by evaluate.py.
+
+    Keys: report_str, macro_f1, weighted_f1, cm, per_class
+    per_class is a dict mapping class name → f1 score.
+    """
+    report_str   = classification_report(y_true, y_pred, target_names=class_names, zero_division=0)
+    macro_f1     = f1_score(y_true, y_pred, average="macro",    zero_division=0)
+    weighted_f1  = f1_score(y_true, y_pred, average="weighted", zero_division=0)
+    cm           = confusion_matrix(y_true, y_pred)
+
+    _, _, per_class_f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, labels=list(range(len(class_names))), zero_division=0
+    )
+    per_class = dict(zip(class_names, per_class_f1.tolist()))
+
+    return {
+        "report_str": report_str,
+        "macro_f1":   macro_f1,
+        "weighted_f1": weighted_f1,
+        "cm":         cm,
+        "per_class":  per_class,
+    }
 
 
 def evaluate_model(model, X_test, y_test, encoder=None):
