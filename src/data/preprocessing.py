@@ -19,17 +19,16 @@ def preprocess_dataset(df, label_column="class1", test_size=0.2, random_state=42
     # ==============================
     for col in df.columns:
         if df[col].dtype == "object" and col not in [label_column]:
-            try:
-                df[col] = pd.to_datetime(df[col], errors="coerce").astype("int64") // 10**9
-            except Exception:
-                df[col] = pd.factorize(df[col])[0]
+            df[col] = pd.factorize(df[col])[0]
 
     df = df.fillna(0)
 
     # ==============================
     # 3. SPLIT FEATURES / LABELS
     # ==============================
-    X = df.drop(columns=[label_column, "binary_label"])
+    label_cols = [label_column, "binary_label"] + [c for c in ["class2", "class3"] if c in df.columns]
+    X = df.drop(columns=label_cols)
+    X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
     y_binary = df["binary_label"]
 
     # Encode multiclass
