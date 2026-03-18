@@ -6,29 +6,28 @@ Developer guide for humans and AI coding agents. Describes the **current state**
 
 ## What this project does
 
-Trains deep learning classifiers for network intrusion detection (IDS) on the **XIIOTID** dataset (IoT traffic). Uses a two-stage approach: a binary classifier (Normal vs Attack) followed by a multi-class classifier (attack type). Addresses severe class imbalance via class weighting and Focal Loss.
+Trains deep learning classifiers for network intrusion detection (IDS) on the **XIIOTID** dataset (IoT traffic). Uses a two-stage approach: a binary classifier (Normal vs Attack) followed by a multi-class classifier (attack type). Addresses severe class imbalance via class weighting and stratified splits.
 
 ---
 
 ## Current state (as of March 2026)
 
-> The codebase is a work-in-progress. The training pipeline is functional but not config-driven. The evaluation pipeline is written but blocked by two remaining bugs.
+> The pipeline is end-to-end functional. All known blocking bugs have been fixed.
 
 ### What works
 - Data loading and preprocessing for XIIOTID (`src/data/xiiotid.py`, `src/data/preprocessing.py`)
+- `scripts/preprocess.py` — saves all `.npy` splits and both `.pkl` artefacts to `data/processed/xiiotid/`
+- `scripts/train.py` — loads processed data, runs two-stage TF training, saves model weights
+- `scripts/evaluate.py` — TF inference via `model.load_weights()` + `model.predict()`, saves metrics JSON + plots
 - Two-stage TensorFlow training: binary model then attack-type model (`src/training/trainer_binary.py`, `src/training/trainer_attack.py`)
 - Model factory (`src/models/build.py`) — TF only, extensible
 - Evaluation metrics and plots (`src/evaluation/metrics.py`, `src/evaluation/plots.py`)
-- Evaluation script (`scripts/evaluate.py`) — TF inference via `model.load_weights()` + `model.predict()`
 
-### What is broken or incomplete
+### What is incomplete or unsupported
 
-| File | Issue |
-|------|-------|
-| `scripts/preprocess.py` | Never saves `.npy` / `.pkl` files — only prints results. `evaluate.py` depends on those files. |
-| `scripts/train.py` | Imports `load_dataset` from `src.data.dataset`, which does not exist. Crashes on import. Also ignores YAML config. |
-| `src/training/trainer.py` | WIP generic trainer — accepts `config` but still uses hardcoded `epochs=40, batch_size=256`. Not yet wired into any script. |
-| CICIDS-2019 | Dataset loader was removed (was a stub). Configs exist but the dataset is not supported. |
+| Item | Status |
+|------|--------|
+| CICIDS-2019 | Config exists (`configs/cicids2019_dnn.yaml`) but no data loader. Not supported. |
 
 ---
 
@@ -61,19 +60,31 @@ All hyperparameters are in `configs/*.yaml`. Key fields:
 
 ```yaml
 dataset: xiiotid
-arch: dnn             # maps to build_model() in src/models/build.py
-input_dim: null       # filled at runtime
-num_classes: null     # filled at runtime
-hidden_dims: [...]    # DNN layer sizes
-dropout: 0.3
-epochs: 50
-batch_size: 1024
-lr: 1.0e-3
-loss: focal | cross_entropy
-use_class_weights: true
+arch: dnn                        # top-level key; maps to build_model() in src/models/build.py
+
+data:
+  raw_path: data/raw/xiiotid
+  processed_path: data/processed/xiiotid    # directory, not a file
+  label_column: class1
+  test_size: 0.2
+
+model:
+  hidden_dims: [256, 128, 64, 32]
+  dropout: 0.3
+
+training:
+  batch_size: 256
+  epochs: 40
+  learning_rate: 0.001
+  class_weight: true
+
+output:
+  model_dir: results/models
+  metrics_dir: results/metrics
+  figures_dir: results/figures
 ```
 
-Active config files: `configs/xiiotid_dnn.yaml`, `configs/cicids2019_dnn.yaml`.
+Active config: `configs/xiiotid_dnn.yaml`. (`configs/cicids2019_dnn.yaml` exists but dataset is unsupported.)
 
 ---
 
@@ -82,56 +93,54 @@ Active config files: `configs/xiiotid_dnn.yaml`, `configs/cicids2019_dnn.yaml`.
 ```
 configs/
   xiiotid_dnn.yaml              Experiment config for XIIOTID + DNN
-  cicids2019_dnn.yaml           Experiment config for CICIDS-2019 + DNN (dataset not yet supported)
+  cicids2019_dnn.yaml           Experiment config for CICIDS-2019 + DNN (dataset not supported)
 data/
   raw/xiiotid/                  Place raw CSV files here (gitignored)
-  processed/xiiotid/            X_train.npy, X_test.npy, y_train.npy, y_test.npy,
-                                label_encoder.pkl, scaler.pkl  (not yet generated — see BUG-1)
+  processed/xiiotid/            X_train.npy, X_test.npy, yb_train.npy, yb_test.npy,
+                                ym_train.npy, ym_test.npy, label_encoder.pkl, scaler.pkl
 notebooks/
   explore_data.ipynb            EDA
   test_loading.ipynb            Data loading experiments
 scripts/
-  preprocess.py                 Load + preprocess  (broken: doesn't save output — BUG-1)
-  train.py                      Two-stage training (broken: bad import + no config — BUG-2)
-  evaluate.py                   Inference + metrics + plots
+  preprocess.py                 Load + preprocess + save all outputs
+  train.py                      Two-stage training (requires --config)
+  evaluate.py                   Inference + metrics + plots (requires --config + --checkpoint)
 src/
   data/
     xiiotid.py                  XIIOTID CSV loader
     preprocessing.py            Encoding, scaling, stratified train/test split
+                                Returns: X_train, X_test, yb_train, yb_test, ym_train, ym_test, le, scaler
   models/
-    dnn.py                      TF DNN builder + Focal Loss
+    dnn.py                      TF DNN builder
     build.py                    Model factory: routes config["arch"] to the right builder
   training/
-    trainer.py                  Generic TF trainer (WIP: hardcoded hyperparams — BUG-3)
-    trainer_binary.py           Stage 1 binary TF trainer
-    trainer_attack.py           Stage 2 attack-type TF trainer
+    trainer_binary.py           Stage 1 binary TF trainer (reads config)
+    trainer_attack.py           Stage 2 attack-type TF trainer (reads config)
   evaluation/
-    metrics.py                  full_report(): accuracy, F1, confusion matrix
+    metrics.py                  full_report(): accuracy, F1, confusion matrix, per-class F1
     plots.py                    plot_confusion_matrix(), plot_per_class_f1()
 results/                        Checkpoints, metrics JSON, plots (gitignored)
 ```
 
 ---
 
-## How to run (what actually works today)
+## How to run
 
 ```bash
-# 1. Preprocess (note: does not yet save files — prints only)
+# 1. Preprocess — saves processed data to data/processed/xiiotid/
 python scripts/preprocess.py
 
-# 2. Training must be invoked directly from a notebook or custom script:
-#    trainer_binary.py: train_binary_model(X_train, yb_train, X_val, yb_val)
-#    trainer_attack.py: train_attack_model(X_train, ym_train, X_val, ym_val, class_weights)
+# 2. Train — two-stage: binary then attack-type; saves weights to results/models/
+python scripts/train.py --config configs/xiiotid_dnn.yaml
 
-# 3. Evaluate (blocked until preprocess.py saves files)
-python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --checkpoint <path.weights.h5>
+# 3. Evaluate
+python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --checkpoint results/models/attack_model.weights.h5
 ```
 
 ---
 
 ## Known issues / TODO
 
-1. **BUG-1** `scripts/preprocess.py` — add `np.save` / `pickle.dump` to persist processed splits to `data/processed/`
-2. **BUG-2** `scripts/train.py` — fix broken `load_dataset` import; wire in YAML config via `--config` argument
-3. **BUG-3** `src/training/trainer.py` — replace hardcoded `epochs`/`batch_size` with values read from `config`
-4. **CICIDS-2019** — re-implement dataset loader (`src/data/cicids2019.py`) if that dataset is needed
+1. **CICIDS-2019** — implement dataset loader (`src/data/cicids2019.py`) if that dataset is needed
+2. **`dnn.py` ignores `model.hidden_dims` and `model.dropout` from config** — architecture is hardcoded to 256→128→64→32; could be made config-driven
+3. **No class weighting in binary trainer** — `trainer_binary.py` doesn't apply class weights; may matter if Normal/Attack ratio is very skewed

@@ -17,14 +17,12 @@ pip install -r requirements.txt
 
 ## How to run
 
-> **Note:** The pipeline is a work-in-progress. See [CLAUDE.md](CLAUDE.md) for what is currently broken.
-
 ```bash
 # 1. Preprocess
 python scripts/preprocess.py
 
 # 2. Train (two-stage: binary then attack-type)
-python scripts/train.py
+python scripts/train.py --config configs/xiiotid_dnn.yaml
 
 # 3. Evaluate
 python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --checkpoint <path>
@@ -43,8 +41,8 @@ notebooks/          EDA and data loading experiments
 scripts/            Entry-point scripts (preprocess, train, evaluate)
 src/
   data/             Data loading and preprocessing
-  models/           DNN (TensorFlow) and 1D-CNN (PyTorch) architectures
-  training/         Training loops and Focal Loss
+  models/           TensorFlow DNN architecture and model factory
+  training/         Two-stage training loops (binary + attack-type)
   evaluation/       Metrics and plots
 results/            Checkpoints, metrics JSON, plots (gitignored)
 ```
