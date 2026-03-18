@@ -1,50 +1,67 @@
-import yaml
-from pathlib import Path
+import numpy as np
+from sklearn.utils.class_weight import compute_class_weight
 
-from src.data.xiiotid import load_xiiotid_dataset
+from src.data.dataset import load_dataset   # 👈 use your loader
 from src.data.preprocessing import preprocess_dataset
-from src.models.build import build_model
-from src.training.trainer import train_model
-from src.evaluation.metrics import evaluate_model
-from src.evaluation.plots import plot_confusion_matrix
+
+from src.training.trainer_binary import train_binary_model
+from src.training.trainer_attack import train_attack_model
 
 
 def main():
 
-    config = yaml.safe_load(open("configs/xiiotid_dnn.yaml"))
+    # =========================
+    # LOAD DATA
+    # =========================
+    df = load_dataset()
 
-    print("Loading dataset")
+    # =========================
+    # PREPROCESS
+    # =========================
+    X_train, X_test, yb_train, yb_test, ym_train, ym_test, le = preprocess_dataset(df)
 
-    df = load_xiiotid_dataset(config["data"]["raw_path"])
+    # =========================
+    # 🔥 STAGE 1: BINARY MODEL
+    # =========================
+    print("\n--- Training Binary Model ---")
+    binary_model = train_binary_model(X_train, yb_train, X_test, yb_test)
 
-    X_train, X_test, y_train, y_test, encoder = preprocess_dataset(
-        df,
-        config["data"]["label_column"],
-        config["data"]["test_size"]
+    # =========================
+    # 🔥 STAGE 2: ATTACK MODEL
+    # =========================
+    print("\n--- Training Attack Model ---")
+
+    # Only attack samples
+    attack_indices = yb_train == 1
+    X_train_attack = X_train[attack_indices]
+    y_train_attack = ym_train[attack_indices] - 1   # 🔥 IMPORTANT FIX
+
+    attack_indices_test = yb_test == 1
+    X_test_attack = X_test[attack_indices_test]
+    y_test_attack = ym_test[attack_indices_test] - 1  # 🔥 IMPORTANT FIX
+
+    # =========================
+    # 🔥 CLASS WEIGHTS
+    # =========================
+    classes = np.unique(y_train_attack)
+
+    class_weights = compute_class_weight(
+        class_weight='balanced',
+        classes=classes,
+        y=y_train_attack
     )
 
-    print("Building model")
+    class_weights = dict(zip(classes, class_weights))
 
-    model = build_model(
-        config,
-        X_train.shape[1],
-        len(encoder.classes_)
-    )
+    print("Class weights:", class_weights)
 
-    print("Training model")
-
-    train_model(model, X_train, y_train, config)
-
-    print("Evaluating")
-
-    acc, report, cm = evaluate_model(model, X_test, y_test)
-
-    print("Accuracy:", acc)
-    print(report)
-
-    plot_confusion_matrix(
-        cm,
-        Path(config["output"]["figures_dir"]) / "confusion_matrix.png"
+    # =========================
+    # TRAIN ATTACK MODEL
+    # =========================
+    attack_model = train_attack_model(
+        X_train_attack, y_train_attack,
+        X_test_attack, y_test_attack,
+        class_weights
     )
 
 

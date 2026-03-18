@@ -3,17 +3,17 @@ dataset: xiiotid
 data:
   raw_path: data/raw/xiiotid
   processed_path: data/processed/xiiotid.csv
-  label_column: label
+  label_column: class1
   test_size: 0.2
 
 model:
   type: dnn
-  hidden_layers: [128, 64, 32]
-  dropout: 0.3
+  hidden_layers: [512, 256, 128, 64, 32]
+  dropout: 0.2
 
 training:
   batch_size: 256
-  epochs: 20
+  epochs: 40
   learning_rate: 0.001
   class_weight: true
 
