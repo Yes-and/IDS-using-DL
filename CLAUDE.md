@@ -153,7 +153,7 @@ python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --checkpoint result
 The pipeline produces metrics that are too good to trust. Fixing the issues below one at a time
 (retrain + evaluate after each step) will reveal how much each one inflates scores.
 
-### Step 1 — Drop identity features `[ ]`
+### Step 1 — Drop identity features `[x]`
 
 **File:** `src/data/preprocessing.py`
 

@@ -26,8 +26,10 @@ def preprocess_dataset(df, label_column="class1", test_size=0.2, random_state=42
     # ==============================
     # 3. SPLIT FEATURES / LABELS
     # ==============================
+    identity_cols = ["Date", "Timestamp", "Scr_IP", "Des_IP"]
     label_cols = [label_column, "binary_label"] + [c for c in ["class2", "class3"] if c in df.columns]
-    X = df.drop(columns=label_cols)
+    drop_cols = label_cols + [c for c in identity_cols if c in df.columns]
+    X = df.drop(columns=drop_cols)
     X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
     y_binary = df["binary_label"]
 
