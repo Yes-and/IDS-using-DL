@@ -6,3 +6,4 @@ tensorflow
 imbalanced-learn
 joblib
 pyyaml
+seaborn
