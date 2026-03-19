@@ -165,7 +165,7 @@ Per-fold artefacts saved by `train.py`:
 
 ## Key decisions
 
-**Why two-stage?** A single multi-class model is dominated by the Normal majority. Separating the binary decision from attack-type classification lets each model focus on its own distribution.
+**Why two-stage?** A single multi-class model is dominated by the Normal majority. Separating the binary decision from attack-type classification lets each model focus on its own distribution. Note: the two stages are currently evaluated independently (Stage 2 is scored against ground-truth attack labels, not Stage 1 output) — see Known issue #1.
 
 **Why stratified k-fold instead of time-based split?** A temporal split was tried but abandoned: rare attack classes only appear in certain time windows, so some classes were entirely absent from val/test, breaking `attack_le.transform`. XIIOTID timestamps are simulation artifacts with no temporal signal.
 
@@ -195,5 +195,14 @@ Per-fold artefacts saved by `train.py`:
 
 ## Known issues / TODO
 
-1. **Architecture is hardcoded in trainers** — hidden layer dims and dropout are not configurable via `configs/xiiotid_dnn.yaml`; they must be changed directly in `trainer_binary.py` / `trainer_attack.py`.
-2. **CICIDS-2019 unsupported** — `configs/cicids2019_dnn.yaml` exists but there is no data loader or preprocessing script.
+### Evaluation / methodology limitations
+
+1. **Cascade error is never measured** — Stage 2 is evaluated against ground-truth attack labels (`yb_val == 1`), not against Stage 1's predictions. In real deployment, Stage 1 false negatives (attacks routed to "Normal") are silently missed, and false positives (Normal routed to Stage 2) pollute Stage 2's input. The reported Stage 2 metrics are therefore optimistic; true end-to-end system accuracy is unknown. A proper end-to-end evaluation would feed Stage 2 with Stage 1's output, not ground truth.
+2. **Val metrics in `train.py` summary are inflated** — `binary_val_acc` and `attack_val_acc` are recorded as `max(history["val_accuracy"])` across all epochs. Both trainers use `EarlyStopping(restore_best_weights=True)` which restores the best `val_loss` epoch — not necessarily the best `val_accuracy` epoch. The in-training summary can therefore be slightly optimistic. `evaluate.py` reloads saved weights and re-evaluates, so its figures are accurate.
+3. **`pd.factorize` runs before the train/test split** — `preprocessing.py` factorizes categorical columns on the full dataset before `train_test_split`. The integer encoding is thus influenced by test-set values. In practice the effect is minimal (it is an integer assignment, not a statistical transform), but ideally the encoding would be fit on training data only and applied to test, so held-out-only categories are treated as unknown.
+4. **`attack_le` fold-consistency is an implicit assumption** — the `--test` ensemble loads only fold 0's `attack_le` and assumes all folds share the same class ordering. `LabelEncoder` sorts alphabetically, so this holds in normal conditions. It would silently break if a rare class were entirely absent from one fold's training split, causing that fold's encoder to produce a shifted index mapping.
+
+### Missing functionality
+
+5. **Architecture is hardcoded in trainers** — hidden layer dims and dropout are not configurable via `configs/xiiotid_dnn.yaml`; they must be changed directly in `trainer_binary.py` / `trainer_attack.py`.
+6. **CICIDS-2019 unsupported** — `configs/cicids2019_dnn.yaml` exists but there is no data loader or preprocessing script.
