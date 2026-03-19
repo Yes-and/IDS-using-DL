@@ -177,9 +177,17 @@ def _evaluate_test(X, yb, ym, le, test_idx, model_dir, cfg, figures_dir, run_tag
     print(binary_results["report_str"])
 
     # --- Stage 2: Attack ensemble ---
-    # attack_le classes are sorted alphabetically and consistent across folds
+    # attack_le classes are sorted alphabetically and consistent across folds.
+    # Assert this holds — would silently break if a rare class were absent from any fold.
     with open(model_dir / "attack_label_encoder_fold0.pkl", "rb") as f:
         attack_le = pickle.load(f)
+    for _fold in range(1, n_folds):
+        with open(model_dir / f"attack_label_encoder_fold{_fold}.pkl", "rb") as f:
+            _other_le = pickle.load(f)
+        assert np.array_equal(attack_le.classes_, _other_le.classes_), (
+            f"attack_le class mismatch between fold 0 and fold {_fold}: "
+            f"{attack_le.classes_} vs {_other_le.classes_}"
+        )
     attack_class_names = [le.classes_[i] for i in attack_le.classes_]
     n_attack_classes = len(attack_le.classes_)
 
