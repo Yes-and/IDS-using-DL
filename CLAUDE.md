@@ -113,8 +113,9 @@ data/
 scripts/
   preprocess.py                 Saves full arrays + test_idx.npy to data/processed/xiiotid/
   train.py                      5-fold CV on train split only; saves per-fold artefacts
-  evaluate.py                   --cv: evaluate CV folds (filtered classes only)
-                                --test: evaluate held-out test set
+  evaluate.py                   default: evaluate all CV folds (filtered classes only)
+                                --fold N: evaluate a single fold (0-indexed)
+                                --test: evaluate held-out test set (ensemble of all folds)
 src/
   data/
     xiiotid.py                  CSV loader
@@ -178,6 +179,14 @@ Per-fold artefacts saved by `train.py`:
 **Why 80/20 for the held-out split?** The rarest class (`Fake_notification`, ~15 samples) needs at least 3 test samples for `sklearn`'s stratified split to work. 80/20 achieves this; 90/10 risks a stratification failure. The split is stratified on `ym` (multi-class labels) to guarantee all 18 attack types appear in both partitions.
 
 **Why stratify the held-out split on `ym` not `yb`?** Stratifying on binary labels would guarantee Normal/Attack proportions but could leave some rare attack types entirely in one partition. Stratifying on `ym` is the stricter constraint.
+
+**Why inverse-frequency class weighting?** XIIOTID is severely imbalanced — RDOS alone is ~28k samples while `Reverse_shell` is ~200. `compute_class_weight('balanced')` is applied to both the binary model and the attack-type model so rare classes are not drowned out during training.
+
+**How does `--test` ensemble work?** Averages sigmoid/softmax probabilities across all 5 fold models (each fold's own scaler is applied before prediction), then argmax. Valid because `attack_le` is fit with `LabelEncoder` which sorts alphabetically — classes are in the same order across all folds. Do not use `--test` results to tune hyperparameters; it is a final, one-shot evaluation.
+
+**Why `ym` stores integers, not class name strings?** `preprocessing.py` returns `ym` as the output of `LabelEncoder.transform()` — integer codes 0..18. Comparisons like `ym == "BruteForce"` will silently return all-False. Always use `enumerate(le.classes_)` to get `(index, name)` pairs when computing per-class counts from `ym`.
+
+**How are excluded-class predictions handled in evaluation?** `keep_mask` filters rows where the *true* label is a kept class. The model can still predict an excluded class for those rows. These predictions are mapped to a dummy index `n_kept` (one beyond the kept range) via `label_map.get(y, n_kept)`, so they count as misclassifications. `full_report()` receives `labels=list(range(n_kept))` to restrict sklearn's reporting to the kept classes only.
 
 ---
 
