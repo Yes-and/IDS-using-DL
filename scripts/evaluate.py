@@ -101,6 +101,39 @@ def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag, ev
     plot_per_class_f1(attack_results["per_class"],
                       save_path=figures_dir / f"{tag}_attack_f1.png")
 
+    # -----------------------------------------
+    # End-to-end evaluation (Stage 1 gates Stage 2)
+    # -----------------------------------------
+    fn_count = int(np.sum((yb_val == 1) & (yb_pred == 0)))
+    fp_count = int(np.sum((yb_val == 0) & (yb_pred == 1)))
+
+    # Run Stage 2 on what Stage 1 actually passed through (may include Normal FPs,
+    # excludes Attack FNs that were silently dropped at Stage 1).
+    stage2_gate = yb_pred == 1
+    y_pred_stage2_gated = np.full(len(yb_val), -1, dtype=int)  # -1 = predicted Normal
+    if stage2_gate.any():
+        s2_out = np.argmax(attack_model.predict(X_val[stage2_gate], verbose=0), axis=1)
+        y_pred_stage2_gated[stage2_gate] = s2_out
+
+    # Score end-to-end over true attack samples only (same keep filter as above).
+    # Predictions of -1 (Stage 1 FN) map to n_kept → counted as misses by full_report.
+    y_pred_e2e_attack = y_pred_stage2_gated[attack_mask]
+    y_pred_e2e_eval = np.array([
+        n_kept if p == -1 else label_map.get(p, n_kept)
+        for p in y_pred_e2e_attack[keep_mask]
+    ])
+
+    print(f"\n=== Fold {fold} — End-to-End: Attack Classification (Stage 1 gate) ===")
+    print(f"  Stage 1 false negatives (attacks silently missed): {fn_count}")
+    print(f"  Stage 1 false positives (Normal routed to Stage 2): {fp_count}")
+    e2e_results = full_report(y_true_eval, y_pred_e2e_eval, class_names=eval_names)
+    print(e2e_results["report_str"])
+    print(f"End-to-end Macro F1:    {e2e_results['macro_f1']:.4f}")
+    print(f"End-to-end Weighted F1: {e2e_results['weighted_f1']:.4f}")
+
+    plot_confusion_matrix(e2e_results["cm"], eval_names,
+                          save_path=figures_dir / f"{tag}_e2e_attack_cm.png")
+
     return {
         "fold": fold,
         "binary_accuracy": float(accuracy_score(yb_val, yb_pred)),
@@ -108,6 +141,10 @@ def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag, ev
         "attack_accuracy": float(accuracy_score(y_true_eval, y_pred_eval)),
         "attack_macro_f1": attack_results["macro_f1"],
         "attack_weighted_f1": attack_results["weighted_f1"],
+        "e2e_attack_macro_f1": e2e_results["macro_f1"],
+        "e2e_attack_weighted_f1": e2e_results["weighted_f1"],
+        "stage1_fn_count": fn_count,
+        "stage1_fp_count": fp_count,
     }
 
 
@@ -189,12 +226,53 @@ def _evaluate_test(X, yb, ym, le, test_idx, model_dir, cfg, figures_dir, run_tag
     plot_per_class_f1(attack_results["per_class"],
                       save_path=figures_dir / f"{tag}_attack_f1.png")
 
+    # -----------------------------------------
+    # End-to-end evaluation (Stage 1 gates Stage 2)
+    # -----------------------------------------
+    fn_count = int(np.sum((yb_test == 1) & (yb_pred == 0)))
+    fp_count = int(np.sum((yb_test == 0) & (yb_pred == 1)))
+
+    stage2_gate = yb_pred == 1
+    y_pred_stage2_gated = np.full(len(yb_test), -1, dtype=int)  # -1 = predicted Normal
+    if stage2_gate.any():
+        e2e_attack_probs = np.zeros((int(stage2_gate.sum()), n_attack_classes))
+        for fold in range(n_folds):
+            with open(model_dir / f"scaler_fold{fold}.pkl", "rb") as f:
+                scaler = pickle.load(f)
+            X_scaled = scaler.transform(X_test[stage2_gate])
+            attack_model = build_attack_model(X_scaled.shape[1], n_attack_classes)
+            attack_model.load_weights(str(model_dir / f"attack_model_fold{fold}.weights.h5"))
+            e2e_attack_probs += attack_model.predict(X_scaled, verbose=0)
+        e2e_attack_probs /= n_folds
+        y_pred_stage2_gated[stage2_gate] = np.argmax(e2e_attack_probs, axis=1)
+
+    y_pred_e2e_attack = y_pred_stage2_gated[attack_mask]
+    y_pred_e2e_eval = np.array([
+        n_kept if p == -1 else label_map.get(p, n_kept)
+        for p in y_pred_e2e_attack[keep_mask]
+    ])
+
+    print("\n=== TEST SET — End-to-End: Attack Classification (Stage 1 gate) ===")
+    print(f"  Stage 1 false negatives (attacks silently missed): {fn_count}")
+    print(f"  Stage 1 false positives (Normal routed to Stage 2): {fp_count}")
+    e2e_results = full_report(y_true_eval, y_pred_e2e_eval, class_names=eval_names)
+    print(e2e_results["report_str"])
+    print(f"End-to-end Macro F1:    {e2e_results['macro_f1']:.4f}")
+    print(f"End-to-end Weighted F1: {e2e_results['weighted_f1']:.4f}")
+
+    plot_confusion_matrix(e2e_results["cm"], eval_names,
+                          save_path=figures_dir / f"{tag}_e2e_attack_cm.png")
+
     return {
-        "binary_accuracy":   float(accuracy_score(yb_test, yb_pred)),
-        "binary_macro_f1":   binary_results["macro_f1"],
-        "attack_accuracy":   float(accuracy_score(y_true_eval, y_pred_eval)),
-        "attack_macro_f1":   attack_results["macro_f1"],
-        "attack_weighted_f1": attack_results["weighted_f1"],
+        "binary_accuracy":        float(accuracy_score(yb_test, yb_pred)),
+        "binary_macro_f1":        binary_results["macro_f1"],
+        "attack_accuracy":        float(accuracy_score(y_true_eval, y_pred_eval)),
+        "attack_macro_f1":        attack_results["macro_f1"],
+        "attack_weighted_f1":     attack_results["weighted_f1"],
+        "e2e_attack_macro_f1":    e2e_results["macro_f1"],
+        "e2e_attack_weighted_f1": e2e_results["weighted_f1"],
+        "stage1_fn_count":        fn_count,
+        "stage1_fp_count":        fp_count,
     }
 
 
@@ -269,7 +347,12 @@ def main():
     print(f"\n{'='*50}")
     print("  Aggregated Evaluation Results")
     print(f"{'='*50}")
-    for metric in ["binary_accuracy", "binary_macro_f1", "attack_accuracy", "attack_macro_f1", "attack_weighted_f1"]:
+    for metric in [
+        "binary_accuracy", "binary_macro_f1",
+        "attack_accuracy", "attack_macro_f1", "attack_weighted_f1",
+        "e2e_attack_macro_f1", "e2e_attack_weighted_f1",
+        "stage1_fn_count", "stage1_fp_count",
+    ]:
         vals = [r[metric] for r in all_results]
         print(f"  {metric}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
