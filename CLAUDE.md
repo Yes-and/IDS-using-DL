@@ -215,11 +215,10 @@ Per-fold artefacts saved by `train.py`:
 
 ### Evaluation / methodology limitations
 
-1. **Val metrics in `train.py` summary are inflated** — `binary_val_acc` and `attack_val_acc` are recorded as `max(history["val_accuracy"])` across all epochs. Both trainers use `EarlyStopping(restore_best_weights=True)` which restores the best `val_loss` epoch — not necessarily the best `val_accuracy` epoch. The in-training summary can therefore be slightly optimistic. `evaluate.py` reloads saved weights and re-evaluates, so its figures are accurate.
-2. **`pd.factorize` runs before the train/test split** — `preprocessing.py` factorizes categorical columns on the full dataset before `train_test_split`. The integer encoding is thus influenced by test-set values. In practice the effect is minimal (it is an integer assignment, not a statistical transform), but ideally the encoding would be fit on training data only and applied to test, so held-out-only categories are treated as unknown.
-3. **`attack_le` fold-consistency is an implicit assumption** — the `--test` ensemble loads only fold 0's `attack_le` and assumes all folds share the same class ordering. `LabelEncoder` sorts alphabetically, so this holds in normal conditions. It would silently break if a rare class were entirely absent from one fold's training split, causing that fold's encoder to produce a shifted index mapping.
+1. **Val metrics in `train.py` summary are inflated** — `binary_val_acc` and `attack_val_acc` are recorded as `max(history["val_accuracy"])` across all epochs. Both trainers use `EarlyStopping(restore_best_weights=True)` which restores the best `val_loss` epoch — not necessarily the best `val_accuracy` epoch. The in-training summary can therefore be slightly optimistic. Accepted as-is: `evaluate.py` reloads saved weights and re-evaluates, so all reported figures are accurate; the training summary is informational only.
+2. **`pd.factorize` runs before the train/test split** — `preprocessing.py` factorizes categorical columns on the full dataset before `train_test_split`. The integer encoding is thus influenced by test-set values. In practice the effect is minimal (it is an integer assignment, not a statistical transform), but ideally the encoding would be fit on training data only and applied to test, so held-out-only categories are treated as unknown. Noted but not worth fixing on XIIOTID.
 
 ### Missing functionality
 
-4. **Architecture is hardcoded in trainers** — hidden layer dims and dropout are not configurable via `configs/xiiotid_dnn.yaml`; they must be changed directly in `trainer_binary.py` / `trainer_attack.py`.
-5. **CICIDS-2019 unsupported** — `configs/cicids2019_dnn.yaml` exists but there is no data loader or preprocessing script.
+3. **Architecture is hardcoded in trainers** — hidden layer dims and dropout are not configurable via `configs/xiiotid_dnn.yaml`; they must be changed directly in `trainer_binary.py` / `trainer_attack.py`.
+4. **CICIDS-2019 unsupported** — `configs/cicids2019_dnn.yaml` exists but there is no data loader or preprocessing script.
