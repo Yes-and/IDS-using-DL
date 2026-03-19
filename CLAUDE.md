@@ -50,8 +50,8 @@ Input → [Binary model] → Normal / Attack
                          [Attack model] → Attack type (18 classes trained, 15 evaluated)
 ```
 
-- **Stage 1** (`trainer_binary.py`): 2-layer sigmoid classifier. Labels: `0 = Normal`, `1 = Attack`.
-- **Stage 2** (`trainer_attack.py`): 3-layer softmax classifier. Trained only on attack samples. Attack labels are re-encoded with a fresh `LabelEncoder` per fold to produce contiguous 0-indexed classes with Normal excluded. The fitted encoder is saved and loaded at eval time — do not re-fit on val data.
+- **Stage 1** (`trainer_binary.py`): 2 hidden layers (128→64, ReLU, BatchNorm, Dropout) + sigmoid output. Labels: `0 = Normal`, `1 = Attack`.
+- **Stage 2** (`trainer_attack.py`): 3 hidden layers (256→128→64, ReLU, BatchNorm, Dropout) + softmax output. Trained only on attack samples. Attack labels are re-encoded with a fresh `LabelEncoder` per fold to produce contiguous 0-indexed classes with Normal excluded. The fitted encoder is saved and loaded at eval time — re-fitting on val data would renumber classes differently and may fail if val lacks rare classes.
 
 ### Framework
 
@@ -78,10 +78,6 @@ data:
   processed_path: data/processed/xiiotid
   label_column: class1
 
-model:
-  hidden_dims: [256, 128, 64, 32]   # NOTE: currently hardcoded in trainers, not read from config
-  dropout: 0.3                       # NOTE: same — hardcoded
-
 training:
   n_folds: 5
   batch_size: 256
@@ -99,6 +95,8 @@ output:
   figures_dir: results/figures
 ```
 
+Architecture (hidden layer dims, dropout rate) is hardcoded directly in the trainers — there is no `model:` config section to avoid stale/misleading values.
+
 ---
 
 ## File map
@@ -107,6 +105,7 @@ output:
 pyproject.toml                  Editable install — run `pip install -e .` once after cloning
 configs/
   xiiotid_dnn.yaml              Active config
+  cicids2019_dnn.yaml           Placeholder — no data loader exists yet (see Known issues)
 data/
   raw/xiiotid/                  Raw CSV files (gitignored)
   processed/xiiotid/            X.npy, yb.npy, ym.npy, label_encoder.pkl, test_idx.npy
@@ -114,8 +113,8 @@ scripts/
   preprocess.py                 Saves full arrays + test_idx.npy to data/processed/xiiotid/
   train.py                      5-fold CV on train split only; saves per-fold artefacts
   evaluate.py                   default: evaluate all CV folds (filtered classes only)
-                                --fold N: evaluate a single fold (0-indexed)
-                                --test: evaluate held-out test set (ensemble of all folds)
+                                --fold N: evaluate one fold's model against its own val split (0-indexed)
+                                --test: evaluate held-out test set (probability ensemble of all 5 fold models)
 src/
   data/
     xiiotid.py                  CSV loader
@@ -126,7 +125,7 @@ src/
     build.py                    Model factory (unused by current pipeline)
   training/
     trainer_binary.py           Stage 1 trainer — supports class_weight kwarg
-    trainer_attack.py           Stage 2 trainer
+    trainer_attack.py           Stage 2 trainer — also uses ReduceLROnPlateau (factor 0.5, patience 2)
   evaluation/
     metrics.py                  full_report() → report_str, macro_f1, weighted_f1, cm, per_class
     plots.py                    plot_confusion_matrix(), plot_per_class_f1()
@@ -184,7 +183,11 @@ Per-fold artefacts saved by `train.py`:
 
 **How does `--test` ensemble work?** Averages sigmoid/softmax probabilities across all 5 fold models (each fold's own scaler is applied before prediction), then argmax. Valid because `attack_le` is fit with `LabelEncoder` which sorts alphabetically — classes are in the same order across all folds. Do not use `--test` results to tune hyperparameters; it is a final, one-shot evaluation.
 
-**Why `ym` stores integers, not class name strings?** `preprocessing.py` returns `ym` as the output of `LabelEncoder.transform()` — integer codes 0..18. Comparisons like `ym == "BruteForce"` will silently return all-False. Always use `enumerate(le.classes_)` to get `(index, name)` pairs when computing per-class counts from `ym`.
+**Two LabelEncoders — don't confuse them.** There are two distinct encoders in the pipeline:
+- **Global `le`** — fit by `preprocessing.py` on all 19 classes (18 attacks + Normal). Saved as `data/processed/xiiotid/label_encoder.pkl`. Produces `ym` (integer codes 0..18). Never re-fit; it is the stable mapping for the full dataset.
+- **Per-fold `attack_le`** — fit by `trainer_attack.py` on the 18 attack classes only (Normal excluded) for each fold's training split. Saved as `results/models/attack_label_encoder_fold{k}.pkl`. Produces the 0-indexed class labels the attack model is trained on and predicts.
+
+`ym` stores integers, not strings — comparisons like `ym == "BruteForce"` silently return all-False. Use `enumerate(le.classes_)` to get `(index, name)` pairs when computing per-class counts from `ym`.
 
 **How are excluded-class predictions handled in evaluation?** `keep_mask` filters rows where the *true* label is a kept class. The model can still predict an excluded class for those rows. These predictions are mapped to a dummy index `n_kept` (one beyond the kept range) via `label_map.get(y, n_kept)`, so they count as misclassifications. `full_report()` receives `labels=list(range(n_kept))` to restrict sklearn's reporting to the kept classes only.
 
@@ -192,5 +195,5 @@ Per-fold artefacts saved by `train.py`:
 
 ## Known issues / TODO
 
-1. **`dnn.py` architecture is hardcoded** — `model.hidden_dims` and `model.dropout` in the config are not used; trainers build a fixed architecture.
-2. **CICIDS-2019 unsupported** — config exists but no data loader.
+1. **Architecture is hardcoded in trainers** — hidden layer dims and dropout are not configurable via `configs/xiiotid_dnn.yaml`; they must be changed directly in `trainer_binary.py` / `trainer_attack.py`.
+2. **CICIDS-2019 unsupported** — `configs/cicids2019_dnn.yaml` exists but there is no data loader or preprocessing script.

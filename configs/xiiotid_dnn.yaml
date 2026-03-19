@@ -6,10 +6,6 @@ data:
   processed_path: data/processed/xiiotid
   label_column: class1
 
-model:
-  hidden_dims: [256, 128, 64, 32]
-  dropout: 0.3
-
 training:
   n_folds: 5
   batch_size: 256
