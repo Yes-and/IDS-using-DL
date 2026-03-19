@@ -18,10 +18,11 @@ def full_report(y_true, y_pred, class_names):
     Keys: report_str, macro_f1, weighted_f1, cm, per_class
     per_class is a dict mapping class name → f1 score.
     """
-    report_str   = classification_report(y_true, y_pred, target_names=class_names, zero_division=0)
-    macro_f1     = f1_score(y_true, y_pred, average="macro",    zero_division=0)
-    weighted_f1  = f1_score(y_true, y_pred, average="weighted", zero_division=0)
-    cm           = confusion_matrix(y_true, y_pred)
+    labels = list(range(len(class_names)))
+    report_str   = classification_report(y_true, y_pred, labels=labels, target_names=class_names, zero_division=0)
+    macro_f1     = f1_score(y_true, y_pred, labels=labels, average="macro",    zero_division=0)
+    weighted_f1  = f1_score(y_true, y_pred, labels=labels, average="weighted", zero_division=0)
+    cm           = confusion_matrix(y_true, y_pred, labels=labels)
 
     _, _, per_class_f1, _ = precision_recall_fscore_support(
         y_true, y_pred, labels=list(range(len(class_names))), zero_division=0

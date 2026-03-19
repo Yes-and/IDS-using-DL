@@ -94,6 +94,13 @@ def main():
     with open(proc_dir / "label_encoder.pkl", "rb") as f:
         le = pickle.load(f)
 
+    # Exclude held-out test indices from CV pool
+    test_idx = np.load(proc_dir / "test_idx.npy")
+    test_mask = np.zeros(len(X), dtype=bool)
+    test_mask[test_idx] = True
+    train_pool_idx = np.where(~test_mask)[0]
+    print(f"CV pool: {len(train_pool_idx)} samples ({len(test_idx)} held out for test)")
+
     out_dir = ROOT / cfg["output"]["model_dir"]
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -114,7 +121,9 @@ def main():
 
     fold_results = []
 
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X, yb)):
+    for fold, (local_train_idx, local_val_idx) in enumerate(skf.split(X[train_pool_idx], yb[train_pool_idx])):
+        train_idx = train_pool_idx[local_train_idx]
+        val_idx   = train_pool_idx[local_val_idx]
         print(f"\n{'='*50}")
         print(f"  Fold {fold + 1} / {n_folds}")
         print(f"{'='*50}")

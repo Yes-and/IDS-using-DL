@@ -19,7 +19,8 @@ import yaml
 ROOT = Path(__file__).parent.parent
 
 
-def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag):
+def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag, eval_class_names,
+                   train_pool_idx):
     from sklearn.metrics import accuracy_score, f1_score
 
     from src.evaluation.metrics import full_report
@@ -31,8 +32,9 @@ def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag):
     from sklearn.model_selection import StratifiedKFold
     n_folds = cfg["training"]["n_folds"]
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
-    splits = list(skf.split(X, yb))
-    _, val_idx = splits[fold]
+    splits = list(skf.split(X[train_pool_idx], yb[train_pool_idx]))
+    _, local_val_idx = splits[fold]
+    val_idx = train_pool_idx[local_val_idx]
 
     # Load scaler and scale val set
     with open(model_dir / f"scaler_fold{fold}.pkl", "rb") as f:
@@ -71,8 +73,21 @@ def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag):
 
     y_pred_attack = np.argmax(attack_model.predict(X_val_attack, verbose=0), axis=1)
 
+    # Filter evaluation to classes meeting the eval_min_samples threshold
+    keep_idx = [i for i, name in enumerate(attack_class_names) if name in eval_class_names]
+    keep_mask = np.isin(y_val_attack, keep_idx)
+    label_map = {old: new for new, old in enumerate(keep_idx)}
+    n_kept = len(keep_idx)
+    y_true_eval = np.array([label_map[y] for y in y_val_attack[keep_mask]])
+    y_pred_eval = np.array([label_map.get(y, n_kept) for y in y_pred_attack[keep_mask]])
+    eval_names = [attack_class_names[i] for i in keep_idx]
+
+    excluded = [n for n in attack_class_names if n not in eval_class_names]
+    if excluded:
+        print(f"  (excluded from metrics — below threshold: {', '.join(excluded)})")
+
     print(f"=== Fold {fold} — Stage 2: Attack-Type Classification ===")
-    attack_results = full_report(y_val_attack, y_pred_attack, class_names=attack_class_names)
+    attack_results = full_report(y_true_eval, y_pred_eval, class_names=eval_names)
     print(attack_results["report_str"])
     print(f"Macro F1:    {attack_results['macro_f1']:.4f}")
     print(f"Weighted F1: {attack_results['weighted_f1']:.4f}")
@@ -81,7 +96,7 @@ def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag):
     tag = f"{run_tag}_fold{fold}"
     plot_confusion_matrix(binary_results["cm"], ["Normal", "Attack"],
                           save_path=figures_dir / f"{tag}_binary_cm.png")
-    plot_confusion_matrix(attack_results["cm"], attack_class_names,
+    plot_confusion_matrix(attack_results["cm"], eval_names,
                           save_path=figures_dir / f"{tag}_attack_cm.png")
     plot_per_class_f1(attack_results["per_class"],
                       save_path=figures_dir / f"{tag}_attack_f1.png")
@@ -90,8 +105,95 @@ def _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag):
         "fold": fold,
         "binary_accuracy": float(accuracy_score(yb_val, yb_pred)),
         "binary_macro_f1": binary_results["macro_f1"],
-        "attack_accuracy": float(accuracy_score(y_val_attack, y_pred_attack)),
+        "attack_accuracy": float(accuracy_score(y_true_eval, y_pred_eval)),
         "attack_macro_f1": attack_results["macro_f1"],
+        "attack_weighted_f1": attack_results["weighted_f1"],
+    }
+
+
+def _evaluate_test(X, yb, ym, le, test_idx, model_dir, cfg, figures_dir, run_tag, eval_class_names):
+    """Ensemble evaluation on the held-out test set (averages predictions across all CV folds)."""
+    from sklearn.metrics import accuracy_score
+    from src.evaluation.metrics import full_report
+    from src.evaluation.plots import plot_confusion_matrix, plot_per_class_f1
+    from src.training.trainer_binary import build_binary_model
+    from src.training.trainer_attack import build_attack_model
+
+    n_folds = cfg["training"]["n_folds"]
+    X_test  = X[test_idx]
+    yb_test = yb[test_idx]
+    ym_test = ym[test_idx]
+
+    # --- Stage 1: Binary ensemble ---
+    binary_probs = np.zeros(len(test_idx))
+    for fold in range(n_folds):
+        with open(model_dir / f"scaler_fold{fold}.pkl", "rb") as f:
+            scaler = pickle.load(f)
+        binary_model = build_binary_model(scaler.transform(X_test).shape[1])
+        binary_model.load_weights(str(model_dir / f"binary_model_fold{fold}.weights.h5"))
+        binary_probs += binary_model.predict(scaler.transform(X_test), verbose=0).squeeze()
+    binary_probs /= n_folds
+    yb_pred = (binary_probs >= 0.5).astype(int)
+
+    print("\n=== TEST SET — Stage 1: Binary Classification ===")
+    binary_results = full_report(yb_test, yb_pred, class_names=["Normal", "Attack"])
+    print(binary_results["report_str"])
+
+    # --- Stage 2: Attack ensemble ---
+    # attack_le classes are sorted alphabetically and consistent across folds
+    with open(model_dir / "attack_label_encoder_fold0.pkl", "rb") as f:
+        attack_le = pickle.load(f)
+    attack_class_names = [le.classes_[i] for i in attack_le.classes_]
+    n_attack_classes = len(attack_le.classes_)
+
+    attack_mask = yb_test == 1
+    X_test_attack = X_test[attack_mask]
+    ym_test_attack = ym_test[attack_mask]
+    y_true_attack = attack_le.transform(ym_test_attack)
+
+    attack_probs = np.zeros((len(X_test_attack), n_attack_classes))
+    for fold in range(n_folds):
+        with open(model_dir / f"scaler_fold{fold}.pkl", "rb") as f:
+            scaler = pickle.load(f)
+        X_scaled = scaler.transform(X_test_attack)
+        attack_model = build_attack_model(X_scaled.shape[1], n_attack_classes)
+        attack_model.load_weights(str(model_dir / f"attack_model_fold{fold}.weights.h5"))
+        attack_probs += attack_model.predict(X_scaled, verbose=0)
+    attack_probs /= n_folds
+    y_pred_attack = np.argmax(attack_probs, axis=1)
+
+    # Filter to eval classes
+    keep_idx = [i for i, name in enumerate(attack_class_names) if name in eval_class_names]
+    keep_mask = np.isin(y_true_attack, keep_idx)
+    label_map = {old: new for new, old in enumerate(keep_idx)}
+    n_kept = len(keep_idx)
+    y_true_eval = np.array([label_map[y] for y in y_true_attack[keep_mask]])
+    y_pred_eval = np.array([label_map.get(y, n_kept) for y in y_pred_attack[keep_mask]])
+    eval_names  = [attack_class_names[i] for i in keep_idx]
+
+    excluded = [n for n in attack_class_names if n not in eval_class_names]
+    if excluded:
+        print(f"  (excluded from metrics — below threshold: {', '.join(excluded)})")
+
+    print("=== TEST SET — Stage 2: Attack-Type Classification ===")
+    attack_results = full_report(y_true_eval, y_pred_eval, class_names=eval_names)
+    print(attack_results["report_str"])
+    print(f"Macro F1:    {attack_results['macro_f1']:.4f}")
+    print(f"Weighted F1: {attack_results['weighted_f1']:.4f}")
+
+    tag = f"{run_tag}_test"
+    plot_confusion_matrix(binary_results["cm"], ["Normal", "Attack"],
+                          save_path=figures_dir / f"{tag}_binary_cm.png")
+    plot_confusion_matrix(attack_results["cm"], eval_names,
+                          save_path=figures_dir / f"{tag}_attack_cm.png")
+    plot_per_class_f1(attack_results["per_class"],
+                      save_path=figures_dir / f"{tag}_attack_f1.png")
+
+    return {
+        "binary_accuracy":   float(accuracy_score(yb_test, yb_pred)),
+        "binary_macro_f1":   binary_results["macro_f1"],
+        "attack_accuracy":   float(accuracy_score(y_true_eval, y_pred_eval)),
+        "attack_macro_f1":   attack_results["macro_f1"],
         "attack_weighted_f1": attack_results["weighted_f1"],
     }
 
@@ -101,6 +203,8 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--fold", type=int, default=None,
                         help="Fold index (0-indexed). Omit to evaluate all folds.")
+    parser.add_argument("--test", action="store_true",
+                        help="Evaluate on the held-out test set using an ensemble of all fold models.")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -116,17 +220,47 @@ def main():
     X  = np.load(proc_dir / "X.npy")
     yb = np.load(proc_dir / "yb.npy")
     ym = np.load(proc_dir / "ym.npy")
+    test_idx = np.load(proc_dir / "test_idx.npy")
     with open(proc_dir / "label_encoder.pkl", "rb") as f:
         le = pickle.load(f)
 
+    # Build train pool (mirrors train.py)
+    test_mask = np.zeros(len(X), dtype=bool)
+    test_mask[test_idx] = True
+    train_pool_idx = np.where(~test_mask)[0]
+
     run_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Compute which attack classes meet the eval threshold
+    eval_min = cfg.get("evaluation", {}).get("eval_min_samples", 0)
+    class_counts = {name: int(np.sum(ym == i)) for i, name in enumerate(le.classes_) if name != "Normal"}
+    eval_class_names = {name for name, count in class_counts.items() if count >= eval_min}
+    excluded_globally = sorted(name for name in class_counts if name not in eval_class_names)
+    if excluded_globally:
+        print(f"Classes excluded from evaluation (below {eval_min} samples): {', '.join(excluded_globally)}")
+
+    # --test: held-out test set evaluation
+    if args.test:
+        result = _evaluate_test(X, yb, ym, le, test_idx, model_dir, cfg, figures_dir, run_tag, eval_class_names)
+        print(f"\n{'='*50}")
+        print("  Held-Out Test Set Results")
+        print(f"{'='*50}")
+        for metric, val in result.items():
+            print(f"  {metric}: {val:.4f}")
+        out_path = metrics_dir / f"{run_tag}_test_metrics.json"
+        with open(out_path, "w") as f:
+            json.dump({"run": run_tag, "eval_type": "held_out_test", "results": result}, f, indent=2)
+        print(f"\nMetrics saved to {out_path}")
+        print(f"Plots saved to {figures_dir}")
+        return
 
     n_folds = cfg["training"]["n_folds"]
     folds_to_eval = [args.fold] if args.fold is not None else list(range(n_folds))
 
     all_results = []
     for fold in folds_to_eval:
-        result = _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag)
+        result = _evaluate_fold(fold, X, yb, ym, le, model_dir, cfg, figures_dir, run_tag, eval_class_names,
+                                train_pool_idx=train_pool_idx)
         all_results.append(result)
 
     # -----------------------------------------
