@@ -126,6 +126,7 @@ scripts/
   preprocess.py                 Saves full arrays + test_idx.npy to data/processed/xiiotid/
   train.py                      5-fold CV on train split only; saves per-fold artefacts
   evaluate.py                   default: evaluate all CV folds (filtered classes only)
+  benchmark_sklearn.py          Two-stage DT/RF/LR benchmark; same train/test split as DNN
                                 --fold N: evaluate one fold's model against its own val split (0-indexed)
                                 --test: evaluate held-out test set (probability ensemble of all 5 fold models)
                                 Each mode produces three evaluation blocks: Stage 1 binary, Stage 2 attack
@@ -169,6 +170,9 @@ python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --fold 0
 
 # 3b. Evaluate held-out test set (run after training is finalised — do not use to tune)
 python scripts/evaluate.py --config configs/xiiotid_dnn.yaml --test
+
+# 4. Sklearn benchmark (Decision Tree, Random Forest, Logistic Regression)
+python scripts/benchmark_sklearn.py --config configs/xiiotid_dnn.yaml
 ```
 
 Per-fold artefacts saved by `train.py`:
@@ -222,3 +226,18 @@ Per-fold artefacts saved by `train.py`:
 
 3. **Architecture is hardcoded in trainers** — hidden layer dims and dropout are not configurable via `configs/xiiotid_dnn.yaml`; they must be changed directly in `trainer_binary.py` / `trainer_attack.py`.
 4. **CICIDS-2019 unsupported** — `configs/cicids2019_dnn.yaml` exists but there is no data loader or preprocessing script.
+
+### Sklearn benchmark
+
+`scripts/benchmark_sklearn.py` — trains Decision Tree, Random Forest, and Logistic Regression as two-stage pipelines mirroring the DNN, and evaluates on the same held-out test set.
+
+**Design decisions:**
+
+- **Methods included:** Decision Tree, Random Forest, Logistic Regression. SVM and KNN dropped — both are impractical at 820k samples (kernel SVM is O(n²–n³); KNN prediction is O(n) per query with no class weighting support).
+- **Two-stage, not flat:** Each classifier has a dedicated Stage 1 binary model and a dedicated Stage 2 attack-type model trained on attack samples only — same structure as the DNN. A flat 19-class approach was tried first but abandoned: it is not architecturally comparable and LR achieved only 59% binary accuracy as a flat classifier.
+- **Single train/test run, not CV:** Uses the existing 80/20 split (`test_idx.npy`) rather than 5-fold CV. One run on the fixed held-out set gives a directly comparable number to the DNN `--test` results.
+- **Evaluation mirrors `evaluate.py` exactly:** Stage 1 binary, Stage 2 ground-truth gate, and end-to-end (Stage 1 gate) blocks — same `keep_mask`/`label_map` logic, same `full_report()`, FN/FP counts reported.
+- **`attack_le`:** Fit once on the full train-pool attack samples (mirrors `trainer_attack.py`). Shared across all classifiers.
+- **Scaling:** Single `StandardScaler` fit on the full train pool (vs per-fold scalers in the DNN — inherent difference, gives sklearn a marginal advantage).
+- **Hyperparameters:** `max_depth=20, min_samples_leaf=5` for DT and RF (prevents pure memorisation on 820k samples); `solver='saga', max_iter=2000, tol=1e-3` for LR.
+- **Output:** JSON to `results/metrics/`, four plots per classifier (binary CM, attack CM, per-class F1, e2e CM) to `results/figures/`, reusing `src/evaluation/plots.py`.
